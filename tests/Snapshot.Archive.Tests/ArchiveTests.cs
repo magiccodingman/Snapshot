@@ -1,7 +1,7 @@
+using System.Runtime.CompilerServices;
 using Snapshot.Protocol.Abstractions;
 using Snapshot.Protocol.Archive;
 using Snapshot.Protocol.Build;
-using Snapshot.Protocol.Routes;
 using Xunit;
 
 namespace Snapshot.Archive.Tests;
@@ -59,18 +59,22 @@ public sealed class ArchiveTests
 
     private sealed class FakeRenderer : ISnapshotRenderer
     {
-        public Task<IReadOnlyList<SnapshotRenderResult>> RenderAsync(
+        public async IAsyncEnumerable<SnapshotRenderResult> RenderAsync(
             SnapshotRenderRequest request,
             IProgress<SnapshotProgress>? progress,
-            CancellationToken cancellationToken)
+            [EnumeratorCancellation] CancellationToken cancellationToken)
         {
-            IReadOnlyList<SnapshotRenderResult> results = request.Routes.Select(route => new SnapshotRenderResult(
-                route,
-                true,
-                $"<!doctype html><html><head><link rel=\"canonical\" href=\"https://example.test{route.Path}\"><meta name=\"snapshot:route\" content=\"{route.Path}\"></head><body><div data-test-page-id=\"fake\"></div></body></html>",
-                1,
-                TimeSpan.FromMilliseconds(1))).ToArray();
-            return Task.FromResult(results);
+            foreach (var route in request.Routes)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return new SnapshotRenderResult(
+                    route,
+                    true,
+                    $"<!doctype html><html><head><link rel=\"canonical\" href=\"https://example.test{route.Path}\"><meta name=\"snapshot:route\" content=\"{route.Path}\"></head><body><div data-test-page-id=\"fake\"></div></body></html>",
+                    1,
+                    TimeSpan.FromMilliseconds(1));
+                await Task.Yield();
+            }
         }
     }
 }
