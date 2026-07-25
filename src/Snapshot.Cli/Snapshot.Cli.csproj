@@ -11,14 +11,7 @@
     <IsPackable>true</IsPackable>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>snapshot</ToolCommandName>
-    <ToolPackageRuntimeIdentifiers>win-x64;linux-x64;linux-arm64;osx-x64;osx-arm64</ToolPackageRuntimeIdentifiers>
-    <PublishAot>true</PublishAot>
-    <PlaywrightPlatform Condition="'$(RuntimeIdentifier)' == ''">none</PlaywrightPlatform>
-    <PlaywrightPlatform Condition="'$(RuntimeIdentifier)' == 'win-x64'">win-x64</PlaywrightPlatform>
-    <PlaywrightPlatform Condition="'$(RuntimeIdentifier)' == 'linux-x64'">linux-x64</PlaywrightPlatform>
-    <PlaywrightPlatform Condition="'$(RuntimeIdentifier)' == 'linux-arm64'">linux-arm64</PlaywrightPlatform>
-    <PlaywrightPlatform Condition="'$(RuntimeIdentifier)' == 'osx-x64'">osx-x64</PlaywrightPlatform>
-    <PlaywrightPlatform Condition="'$(RuntimeIdentifier)' == 'osx-arm64'">osx-arm64</PlaywrightPlatform>
+    <PlaywrightPlatform>none</PlaywrightPlatform>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Snapshot.Protocol/Snapshot.Protocol.csproj" />
