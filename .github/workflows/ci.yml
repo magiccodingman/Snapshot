@@ -72,12 +72,21 @@ jobs:
         run: |
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $package = Get-ChildItem artifacts/packages/Snapshot.Cli.*.nupkg | Select-Object -Single
-          if ($package.Length -gt 10MB) {
-            throw "Snapshot.Cli package is unexpectedly large: $([Math]::Round($package.Length / 1MB, 2)) MB"
-          }
           $archive = [System.IO.Compression.ZipFile]::OpenRead($package.FullName)
           try {
-            $bundledDrivers = @($archive.Entries | Where-Object { $_.FullName -like '*/.playwright/node/*' })
+            $playwrightEntries = @($archive.Entries | Where-Object { $_.FullName -like '*/.playwright/*' } | ForEach-Object FullName)
+            @(
+              "package=$($package.FullName)",
+              "bytes=$($package.Length)",
+              "megabytes=$([Math]::Round($package.Length / 1MB, 2))",
+              "playwrightEntries=$($playwrightEntries.Count)",
+              $playwrightEntries
+            ) | Set-Content package-validation.log
+
+            if ($package.Length -gt 10MB) {
+              throw "Snapshot.Cli package is unexpectedly large: $([Math]::Round($package.Length / 1MB, 2)) MB"
+            }
+            $bundledDrivers = @($playwrightEntries | Where-Object { $_ -like '*/.playwright/node/*' })
             if ($bundledDrivers.Count -gt 0) {
               throw "Snapshot.Cli unexpectedly contains bundled Playwright drivers."
             }
@@ -97,7 +106,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: pack-diagnostics
-          path: pack.log
+          path: |
+            pack.log
+            package-validation.log
+            artifacts/packages/Snapshot.Cli.*.nupkg
       - uses: actions/upload-artifact@v7
         if: success() && matrix.os == 'ubuntu-latest'
         with:
