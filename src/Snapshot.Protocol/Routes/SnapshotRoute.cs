@@ -50,7 +50,14 @@ public sealed record SnapshotRoute
             path = value;
         }
 
-        path = Uri.UnescapeDataString(path.Trim());
+        path = path.Trim();
+        if (path.Contains("%2f", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains("%5c", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new SnapshotRouteException("Encoded path separators are not allowed in routes.");
+        }
+
+        path = Uri.UnescapeDataString(path);
         if (!path.StartsWith('/'))
         {
             path = '/' + path;
@@ -73,7 +80,7 @@ public sealed record SnapshotRoute
                 throw new SnapshotRouteException("Route traversal segments are not allowed.");
             }
 
-            if (segment.Contains('/') || segment.Contains('\\'))
+            if (segment.Contains('\\'))
             {
                 throw new SnapshotRouteException("Encoded path separators are not allowed in routes.");
             }
