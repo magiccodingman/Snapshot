@@ -33,14 +33,14 @@ jobs:
           npm test
           npm run build
       - name: Restore
-        run: dotnet restore Snapshot.sln
+        run: dotnet restore Snapshot.sln --verbosity quiet
       - name: Build
-        run: dotnet build Snapshot.sln -c Release --no-restore
+        run: dotnet build Snapshot.sln -c Release --no-restore --verbosity quiet
       - name: Test
-        run: dotnet test Snapshot.sln -c Release --no-build --filter "FullyQualifiedName!~SnapshotEndToEndTests"
+        run: dotnet test Snapshot.sln -c Release --no-build --filter "FullyQualifiedName!~SnapshotEndToEndTests" --verbosity quiet
       - name: Pack
         if: matrix.os == 'ubuntu-latest'
-        run: dotnet pack Snapshot.sln -c Release --no-build -o artifacts/packages
+        run: dotnet pack Snapshot.sln -c Release --no-build -o artifacts/packages --verbosity quiet
       - uses: actions/upload-artifact@v7
         if: matrix.os == 'ubuntu-latest'
         with:
@@ -55,10 +55,10 @@ jobs:
         with:
           global-json-file: global.json
       - name: Restore and build
-        run: dotnet build Snapshot.sln -c Release
+        run: dotnet build Snapshot.sln -c Release --verbosity quiet
       - name: Install Chromium and Linux dependencies
         run: dotnet run --project src/Snapshot.Cli/Snapshot.Cli.csproj -c Release --no-build -- browser install --with-deps
       - name: Run browser tests
         env:
           SNAPSHOT_E2E: '1'
-        run: dotnet test tests/Snapshot.EndToEndTests/Snapshot.EndToEndTests.csproj -c Release --no-build
+        run: dotnet test tests/Snapshot.EndToEndTests/Snapshot.EndToEndTests.csproj -c Release --no-build --verbosity quiet
