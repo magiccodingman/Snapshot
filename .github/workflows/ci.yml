@@ -33,7 +33,13 @@ jobs:
           npm test
           npm run build
       - name: Restore
-        run: dotnet restore Snapshot.sln --verbosity quiet
+        shell: pwsh
+        run: |
+          dotnet restore Snapshot.sln --verbosity quiet *> restore.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content restore.log | Select-String -Pattern 'error|NU\d{4}|MSB\d{4}'
+            exit $LASTEXITCODE
+          }
       - name: Build
         run: dotnet build Snapshot.sln -c Release --no-restore --verbosity quiet
       - name: Test
@@ -55,7 +61,13 @@ jobs:
         with:
           global-json-file: global.json
       - name: Restore and build
-        run: dotnet build Snapshot.sln -c Release --verbosity quiet
+        shell: pwsh
+        run: |
+          dotnet build Snapshot.sln -c Release --verbosity quiet *> build.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content build.log | Select-String -Pattern 'error|NU\d{4}|MSB\d{4}|CS\d{4}'
+            exit $LASTEXITCODE
+          }
       - name: Install Chromium and Linux dependencies
         run: dotnet run --project src/Snapshot.Cli/Snapshot.Cli.csproj -c Release --no-build -- browser install --with-deps
       - name: Run browser tests
