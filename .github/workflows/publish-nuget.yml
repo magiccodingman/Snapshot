@@ -30,16 +30,12 @@ jobs:
         run: |
           dotnet restore Snapshot.sln
           dotnet test Snapshot.sln -c Release --no-restore --filter "FullyQualifiedName!~SnapshotEndToEndTests"
-      - name: Pack libraries and platform CLI packages
-        shell: pwsh
+      - name: Pack NuGet libraries and CLI tool
         run: |
-          New-Item -ItemType Directory -Force artifacts/packages | Out-Null
+          mkdir -p artifacts/packages
           dotnet pack src/Snapshot.Protocol/Snapshot.Protocol.csproj -c Release --no-restore -o artifacts/packages
           dotnet pack src/Snapshot.Playwright/Snapshot.Playwright.csproj -c Release --no-restore -o artifacts/packages
-          dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release -o artifacts/packages
-          foreach ($rid in @('win-x64', 'linux-x64', 'linux-arm64', 'osx-x64', 'osx-arm64')) {
-            dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release -r $rid -p:PublishAot=false -o artifacts/packages
-          }
+          dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release --no-restore -o artifacts/packages
       - name: Validate packed CLI installation
         shell: pwsh
         run: |
@@ -56,23 +52,18 @@ jobs:
         run: |
           set -euo pipefail
           version="$(sed -n 's:.*<SnapshotPackageVersion>\(.*\)</SnapshotPackageVersion>.*:\1:p' eng/Versions.props)"
-          cli_pointer="artifacts/packages/Snapshot.Cli.${version}.nupkg"
 
-          # Publish dependencies and RID-specific CLI packages before the top-level
-          # pointer package so dotnet tool install can always resolve its platform.
-          for package in artifacts/packages/*.nupkg; do
-            if [[ "$package" == "$cli_pointer" ]]; then
-              continue
-            fi
-            dotnet nuget push "$package" \
-              --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
-              --source https://api.nuget.org/v3/index.json \
-              --skip-duplicate
-          done
+          dotnet nuget push "artifacts/packages/Snapshot.Protocol.${version}.nupkg" \
+            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
 
-          if [[ -f "$cli_pointer" ]]; then
-            dotnet nuget push "$cli_pointer" \
-              --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
-              --source https://api.nuget.org/v3/index.json \
-              --skip-duplicate
-          fi
+          dotnet nuget push "artifacts/packages/Snapshot.Playwright.${version}.nupkg" \
+            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+          dotnet nuget push "artifacts/packages/Snapshot.Cli.${version}.nupkg" \
+            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
