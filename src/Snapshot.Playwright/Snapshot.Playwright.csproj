@@ -15,4 +15,13 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <AssemblyMetadata Include="MicrosoftPlaywrightPackageVersion" Value="$(PlaywrightPackageVersion)" />
   </ItemGroup>
+
+  <Target Name="ExcludePlaywrightLauncher"
+          AfterTargets="CopyPlaywrightFilesToOutput"
+          Condition="'$(SnapshotExcludePlaywrightLauncher)' == 'true'">
+    <ItemGroup>
+      <_PlaywrightLauncherContent Include="@(Content)" Condition="'%(Content.Link)' == 'playwright.ps1'" />
+      <Content Remove="@(_PlaywrightLauncherContent)" />
+    </ItemGroup>
+  </Target>
 </Project>
