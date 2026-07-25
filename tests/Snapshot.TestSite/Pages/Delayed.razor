@@ -1,0 +1,26 @@
+@page "/delayed"
+
+<h1>Delayed</h1>
+@if (_ready)
+{
+    <div data-test-page-id="delayed">Async content is complete.</div>
+    <snapshot-ready>
+        <title>Delayed Test</title>
+        <meta name="description" content="Delayed readiness route." />
+        <link rel="canonical" href="https://example.test/delayed" />
+    </snapshot-ready>
+}
+else
+{
+    <div data-test-page-id="loading">Loading…</div>
+}
+
+@code {
+    private bool _ready;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.Delay(250);
+        _ready = true;
+    }
+}

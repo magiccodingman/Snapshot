@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, release]
+  push:
+    branches: [main, release]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - name: Build and test client
+        working-directory: client
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - name: Restore
+        run: dotnet restore Snapshot.sln
+      - name: Build
+        run: dotnet build Snapshot.sln -c Release --no-restore
+      - name: Test
+        run: dotnet test Snapshot.sln -c Release --no-build --filter "FullyQualifiedName!~SnapshotEndToEndTests"
+      - name: Pack
+        if: matrix.os == 'ubuntu-latest'
+        run: dotnet pack Snapshot.sln -c Release --no-build -o artifacts/packages
+      - uses: actions/upload-artifact@v7
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          name: packages
+          path: artifacts/packages
+
+  end-to-end:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - name: Restore and build
+        run: dotnet build Snapshot.sln -c Release
+      - name: Install Chromium and Linux dependencies
+        run: dotnet run --project src/Snapshot.Cli/Snapshot.Cli.csproj -c Release --no-build -- browser install --with-deps
+      - name: Run browser tests
+        env:
+          SNAPSHOT_E2E: '1'
+        run: dotnet test tests/Snapshot.EndToEndTests/Snapshot.EndToEndTests.csproj -c Release --no-build
