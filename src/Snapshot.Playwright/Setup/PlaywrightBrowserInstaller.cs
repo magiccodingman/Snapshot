@@ -12,6 +12,8 @@ public sealed class PlaywrightBrowserInstaller
     public async Task EnsureInstalledAsync(PlaywrightSnapshotOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
+        await PlaywrightDriverProvisioner.EnsureAsync(_logger, cancellationToken).ConfigureAwait(false);
+
         if (options.BrowserInstallMode == BrowserInstallMode.CustomExecutable)
         {
             if (string.IsNullOrWhiteSpace(options.BrowserExecutablePath) || !File.Exists(options.BrowserExecutablePath))
@@ -44,6 +46,7 @@ public sealed class PlaywrightBrowserInstaller
 
     public async Task InstallAsync(bool withDependencies, CancellationToken cancellationToken = default)
     {
+        await PlaywrightDriverProvisioner.EnsureAsync(_logger, cancellationToken).ConfigureAwait(false);
         TryDeleteMarker(GetMarkerPath());
         await InstallCoreAsync(withDependencies, cancellationToken).ConfigureAwait(false);
         await ValidateLaunchAsync(new PlaywrightSnapshotOptions { BrowserInstallMode = BrowserInstallMode.RequireExisting }, cancellationToken).ConfigureAwait(false);
@@ -54,6 +57,7 @@ public sealed class PlaywrightBrowserInstaller
     {
         try
         {
+            await PlaywrightDriverProvisioner.EnsureAsync(_logger, cancellationToken).ConfigureAwait(false);
             await ValidateLaunchAsync(new PlaywrightSnapshotOptions { BrowserInstallMode = BrowserInstallMode.RequireExisting }, cancellationToken).ConfigureAwait(false);
             await WriteMarkerAsync(cancellationToken).ConfigureAwait(false);
             return true;
