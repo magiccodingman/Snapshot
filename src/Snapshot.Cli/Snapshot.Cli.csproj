@@ -12,7 +12,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>snapshot</ToolCommandName>
     <RuntimeIdentifiers>win-x64;linux-x64;linux-arm64;osx-x64;osx-arm64</RuntimeIdentifiers>
-    <CreateRidSpecificToolPackages>true</CreateRidSpecificToolPackages>
+    <PublishAot Condition="'$(CreateSnapshotCliPointerPackage)' == 'true'">true</PublishAot>
     <PlaywrightPlatform Condition="'$(RuntimeIdentifier)' == ''">none</PlaywrightPlatform>
     <PlaywrightPlatform Condition="'$(RuntimeIdentifier)' == 'win-x64'">win-x64</PlaywrightPlatform>
     <PlaywrightPlatform Condition="'$(RuntimeIdentifier)' == 'linux-x64'">linux-x64</PlaywrightPlatform>
