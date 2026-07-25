@@ -62,6 +62,13 @@ jobs:
             Get-Content pack.log | Select-String -Pattern 'error|NU\d{4}|MSB\d{4}'
             exit $LASTEXITCODE
           }
+      - name: Install packed CLI from local feed
+        if: matrix.os == 'ubuntu-latest'
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path eng/Versions.props -Pattern '<SnapshotPackageVersion>(.*?)</SnapshotPackageVersion>').Matches.Groups[1].Value
+          dotnet tool install Snapshot.Cli --version $version --tool-path artifacts/tool-test --add-source artifacts/packages --ignore-failed-sources
+          ./artifacts/tool-test/snapshot help
       - name: Upload pack diagnostics
         if: failure() && matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v7
