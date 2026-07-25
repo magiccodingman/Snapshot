@@ -40,6 +40,12 @@ jobs:
             Get-Content restore.log | Select-String -Pattern 'error|NU\d{4}|MSB\d{4}'
             exit $LASTEXITCODE
           }
+      - name: Upload restore diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: restore-${{ matrix.os }}
+          path: restore.log
       - name: Build
         run: dotnet build Snapshot.sln -c Release --no-restore --verbosity quiet
       - name: Test
@@ -68,6 +74,12 @@ jobs:
             Get-Content build.log | Select-String -Pattern 'error|NU\d{4}|MSB\d{4}|CS\d{4}'
             exit $LASTEXITCODE
           }
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: end-to-end-build
+          path: build.log
       - name: Install Chromium and Linux dependencies
         run: dotnet run --project src/Snapshot.Cli/Snapshot.Cli.csproj -c Release --no-build -- browser install --with-deps
       - name: Run browser tests
