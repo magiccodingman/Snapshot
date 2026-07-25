@@ -57,10 +57,10 @@ jobs:
           New-Item -ItemType Directory -Force artifacts/packages | Out-Null
           dotnet pack src/Snapshot.Protocol/Snapshot.Protocol.csproj -c Release --no-restore -o artifacts/packages --verbosity quiet *> pack.log
           if ($LASTEXITCODE -eq 0) { dotnet pack src/Snapshot.Playwright/Snapshot.Playwright.csproj -c Release --no-restore -o artifacts/packages --verbosity quiet *>> pack.log }
-          if ($LASTEXITCODE -eq 0) { dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release -p:CreateSnapshotCliPointerPackage=true -o artifacts/packages --verbosity quiet *>> pack.log }
+          if ($LASTEXITCODE -eq 0) { dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release -o artifacts/packages --verbosity quiet *>> pack.log }
           if ($LASTEXITCODE -eq 0) {
             foreach ($rid in @('win-x64', 'linux-x64', 'linux-arm64', 'osx-x64', 'osx-arm64')) {
-              dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release -r $rid -p:PublishAot=false -p:CreateSnapshotCliPointerPackage=false -o artifacts/packages --verbosity quiet *>> pack.log
+              dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release -r $rid -p:PublishAot=false -o artifacts/packages --verbosity quiet *>> pack.log
               if ($LASTEXITCODE -ne 0) { break }
             }
           }
