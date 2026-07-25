@@ -12,10 +12,13 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>snapshot</ToolCommandName>
     <RuntimeIdentifiers>win-x64;linux-x64;linux-arm64;osx-x64;osx-arm64</RuntimeIdentifiers>
-    <PlaywrightPlatform>none</PlaywrightPlatform>
-    <PlaywrightPlatform Condition="$([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('win-'))">win</PlaywrightPlatform>
-    <PlaywrightPlatform Condition="$([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('linux-'))">linux</PlaywrightPlatform>
-    <PlaywrightPlatform Condition="$([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('osx-'))">osx</PlaywrightPlatform>
+    <CreateRidSpecificToolPackages>true</CreateRidSpecificToolPackages>
+    <PlaywrightPlatform Condition="'$(RuntimeIdentifier)' == ''">none</PlaywrightPlatform>
+    <PlaywrightPlatform Condition="'$(RuntimeIdentifier)' == 'win-x64'">win-x64</PlaywrightPlatform>
+    <PlaywrightPlatform Condition="'$(RuntimeIdentifier)' == 'linux-x64'">linux-x64</PlaywrightPlatform>
+    <PlaywrightPlatform Condition="'$(RuntimeIdentifier)' == 'linux-arm64'">linux-arm64</PlaywrightPlatform>
+    <PlaywrightPlatform Condition="'$(RuntimeIdentifier)' == 'osx-x64'">osx-x64</PlaywrightPlatform>
+    <PlaywrightPlatform Condition="'$(RuntimeIdentifier)' == 'osx-arm64'">osx-arm64</PlaywrightPlatform>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Snapshot.Protocol/Snapshot.Protocol.csproj" />
