@@ -16,7 +16,8 @@ internal sealed class BrowserWorker : IAsyncDisposable
     private const string BridgeScript = """
         window.addEventListener("message", event => {
           const data = event?.data;
-          if (event.source === window && data && typeof data.type === "string" && data.type.startsWith("snapshot:")) {
+          const isExecutorResponse = data?.type === "snapshot:result" || data?.type === "snapshot:error";
+          if (event.source === window && isExecutorResponse) {
             window.snapshotProtocolEmit(JSON.stringify(data));
           }
         });
