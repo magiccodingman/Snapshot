@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Snapshot.Playwright;
 using Snapshot.Protocol.Build;
 using Snapshot.Protocol.Hosting;
+using Snapshot.Protocol.Routes;
 using Snapshot.TestHost;
 using Xunit;
 
@@ -19,7 +20,8 @@ public sealed class SnapshotEndToEndTests
 
         var repositoryRoot = FindRepositoryRoot();
         var publishDirectory = Path.Combine(Path.GetTempPath(), "snapshot-e2e", Guid.NewGuid().ToString("N"), "publish");
-        var output = Path.Combine(Path.GetDirectoryName(publishDirectory)!, "site.zip");
+        var outputRoot = Path.GetDirectoryName(publishDirectory)!;
+        var output = Path.Combine(outputRoot, "site.zip");
         Directory.CreateDirectory(publishDirectory);
 
         try
@@ -55,13 +57,42 @@ public sealed class SnapshotEndToEndTests
             Assert.Contains("data-test-page-id=\"immediate\"", immediate, StringComparison.Ordinal);
             Assert.Contains("data-test-page-id=\"delayed\"", delayed, StringComparison.Ordinal);
             Assert.Contains("data-test-page-id=\"unicode-cafe\"", unicode, StringComparison.Ordinal);
+
+            var failedOutput = Path.Combine(outputRoot, "never-ready.zip");
+            var failed = await engine.BuildAsync(new SnapshotBuildRequest
+            {
+                SourceDirectory = webRoot,
+                OutputPath = failedOutput,
+                Discovery = new SnapshotRouteDiscoveryOptions
+                {
+                    Mode = SnapshotRouteDiscoveryMode.ExplicitOnly,
+                    AdditionalRoutes = ["/never-ready"]
+                },
+                CaseAliases = new SnapshotCaseAliasOptions
+                {
+                    Enabled = false,
+                    GenerateMissingPrefixGateways = false
+                },
+                Timeouts = new SnapshotTimeoutOptions
+                {
+                    StartupTimeout = TimeSpan.FromSeconds(30),
+                    RouteTimeout = TimeSpan.FromMilliseconds(500),
+                    WatchdogTimeout = TimeSpan.FromSeconds(3)
+                },
+                Retry = new SnapshotRetryOptions { MaximumAttempts = 1 },
+                Concurrency = 1
+            });
+
+            Assert.False(failed.Succeeded);
+            Assert.Contains(failed.Diagnostics, diagnostic => diagnostic.Code == "READY_TIMEOUT");
+            Assert.False(File.Exists(failedOutput));
+            Assert.False(File.Exists(failedOutput + ".partial"));
         }
         finally
         {
-            var root = Path.GetDirectoryName(publishDirectory)!;
-            if (Directory.Exists(root))
+            if (Directory.Exists(outputRoot))
             {
-                Directory.Delete(root, recursive: true);
+                Directory.Delete(outputRoot, recursive: true);
             }
         }
     }
