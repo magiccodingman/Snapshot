@@ -51,8 +51,10 @@ public sealed class SnapshotEndToEndTests
             using var http = new HttpClient { BaseAddress = host.BaseUri };
             var immediate = await http.GetStringAsync("/immediate/");
             var delayed = await http.GetStringAsync("/delayed/");
+            var unicode = await http.GetStringAsync("/caf%C3%A9/");
             Assert.Contains("data-test-page-id=\"immediate\"", immediate, StringComparison.Ordinal);
             Assert.Contains("data-test-page-id=\"delayed\"", delayed, StringComparison.Ordinal);
+            Assert.Contains("data-test-page-id=\"unicode-cafe\"", unicode, StringComparison.Ordinal);
         }
         finally
         {
