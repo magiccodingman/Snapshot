@@ -18,4 +18,19 @@
     <ProjectReference Include="../Snapshot.Playwright/Snapshot.Playwright.csproj"
                       AdditionalProperties="PlaywrightPlatform=none;SnapshotExcludePlaywrightLauncher=true" />
   </ItemGroup>
+
+  <Target Name="ExcludeTransitivePlaywrightLauncher"
+          AfterTargets="CopyPlaywrightFilesToOutput">
+    <ItemGroup>
+      <_TransitivePlaywrightLauncher Include="@(Content)"
+                                    Condition="'%(Content.Link)' == 'playwright.ps1' Or '%(Content.Filename)%(Content.Extension)' == 'playwright.ps1'" />
+      <Content Remove="@(_TransitivePlaywrightLauncher)" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="DeleteResidualPlaywrightLauncherFromPublish"
+          AfterTargets="Publish"
+          BeforeTargets="PackTool">
+    <Delete Files="$(PublishDir)playwright.ps1" />
+  </Target>
 </Project>
