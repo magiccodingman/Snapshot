@@ -37,21 +37,30 @@ jobs:
           dotnet pack src/Snapshot.Protocol/Snapshot.Protocol.csproj -c Release --no-restore -o artifacts/packages
           dotnet pack src/Snapshot.Playwright/Snapshot.Playwright.csproj -c Release --no-restore -o artifacts/packages
           dotnet clean src/Snapshot.Cli/Snapshot.Cli.csproj -c Release -p:PlaywrightPlatform=none
-          dotnet clean src/Snapshot.Playwright/Snapshot.Playwright.csproj -c Release -p:PlaywrightPlatform=none
-          dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release --no-restore -p:PlaywrightPlatform=none -o artifacts/packages
+          dotnet clean src/Snapshot.Playwright/Snapshot.Playwright.csproj -c Release -p:PlaywrightPlatform=none -p:SnapshotExcludePlaywrightLauncher=true
+          dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release --no-restore -p:PlaywrightPlatform=none -p:SnapshotExcludePlaywrightLauncher=true -o artifacts/packages
       - name: Validate compact CLI package
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $package = Get-ChildItem artifacts/packages/Snapshot.Cli.*.nupkg | Select-Object -Single
+          $package = Get-ChildItem artifacts/packages/Snapshot.Cli.*.nupkg | Select-Object -First 1
+          if ($null -eq $package) {
+            throw "Snapshot.Cli package was not produced."
+          }
+
           if ($package.Length -gt 10MB) {
             throw "Snapshot.Cli package is unexpectedly large: $([Math]::Round($package.Length / 1MB, 2)) MB"
           }
+
           $archive = [System.IO.Compression.ZipFile]::OpenRead($package.FullName)
           try {
-            $bundledDrivers = @($archive.Entries | Where-Object { $_.FullName -like '*/.playwright/node/*' })
-            if ($bundledDrivers.Count -gt 0) {
-              throw "Snapshot.Cli unexpectedly contains bundled Playwright drivers."
+            $playwrightEntries = @($archive.Entries | Where-Object { $_.FullName -like '*/.playwright/*' })
+            $launcherEntries = @($archive.Entries | Where-Object { $_.Name -ieq 'playwright.ps1' })
+            if ($playwrightEntries.Count -gt 0) {
+              throw "Snapshot.Cli unexpectedly contains bundled Playwright driver assets."
+            }
+            if ($launcherEntries.Count -gt 0) {
+              throw "Snapshot.Cli unexpectedly contains playwright.ps1."
             }
           }
           finally {
