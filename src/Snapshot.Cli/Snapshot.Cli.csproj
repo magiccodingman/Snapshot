@@ -15,6 +15,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Snapshot.Protocol/Snapshot.Protocol.csproj" />
-    <ProjectReference Include="../Snapshot.Playwright/Snapshot.Playwright.csproj" AdditionalProperties="PlaywrightPlatform=none" />
+    <ProjectReference Include="../Snapshot.Playwright/Snapshot.Playwright.csproj"
+                      AdditionalProperties="PlaywrightPlatform=none;SnapshotExcludePlaywrightLauncher=true" />
   </ItemGroup>
 </Project>
