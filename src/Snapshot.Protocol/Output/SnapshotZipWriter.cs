@@ -4,12 +4,18 @@ using System.Text;
 using System.Text.Json;
 using Snapshot.Protocol.Abstractions;
 using Snapshot.Protocol.Build;
+using Snapshot.Protocol.Diagnostics;
 using Snapshot.Protocol.Hosting;
 using Snapshot.Protocol.Hosting.Netlify;
 using Snapshot.Protocol.Manifest;
 using Snapshot.Protocol.Protocol;
 
 namespace Snapshot.Protocol.Output;
+
+public sealed record SnapshotZipWriteResult(
+    SnapshotManifest? Manifest,
+    string TemporaryPath,
+    IReadOnlyList<SnapshotRenderResult> RenderResults);
 
 public sealed class SnapshotZipWriter
 {
@@ -25,10 +31,10 @@ public sealed class SnapshotZipWriter
         _logger = logger;
     }
 
-    public async Task<(SnapshotManifest Manifest, string TemporaryPath)> WriteAsync(
+    public async Task<SnapshotZipWriteResult> WriteAsync(
         SnapshotBuildRequest request,
         SnapshotOutputPlan plan,
-        IReadOnlyList<SnapshotRenderResult> renderResults,
+        IAsyncEnumerable<SnapshotRenderResult> renderResults,
         string outputPath,
         string? siteVersion,
         IProgress<SnapshotProgress>? progress,
@@ -42,9 +48,12 @@ public sealed class SnapshotZipWriter
         }
 
         var manifestEntries = new List<SnapshotManifestEntry>();
+        var renderSummaries = new List<SnapshotRenderResult>();
         var written = new HashSet<string>(StringComparer.Ordinal);
-        var renderByRoute = renderResults.ToDictionary(static result => result.Route.Path, StringComparer.Ordinal);
         var canonicalByOutputPath = plan.CanonicalRoutes.ToDictionary(static route => route.OutputPath.Value, StringComparer.Ordinal);
+        var snapshotsByRoute = plan.GeneratedEntries
+            .Where(static entry => entry.Kind == SnapshotGeneratedEntryKind.Snapshot && entry.Route is not null)
+            .ToDictionary(static entry => entry.Route!, StringComparer.Ordinal);
 
         await using var file = new FileStream(
             temporaryPath,
@@ -102,7 +111,66 @@ public sealed class SnapshotZipWriter
             progress?.Report(new SnapshotProgress(SnapshotProgressStage.WritingArchive, $"Copied {archivePath}", ++completed, total));
         }
 
-        foreach (var planned in plan.GeneratedEntries)
+        var renderedRoutes = new HashSet<string>(StringComparer.Ordinal);
+        await foreach (var rendered in renderResults.WithCancellation(cancellationToken).ConfigureAwait(false))
+        {
+            if (!renderedRoutes.Add(rendered.Route.Path))
+            {
+                throw new InvalidOperationException($"The renderer returned route {rendered.Route.Path} more than once.");
+            }
+
+            renderSummaries.Add(rendered with { Html = null });
+            if (!rendered.Succeeded)
+            {
+                continue;
+            }
+
+            if (rendered.Html is null)
+            {
+                throw new InvalidOperationException($"The renderer marked {rendered.Route.Path} successful without returning HTML.");
+            }
+
+            if (!snapshotsByRoute.TryGetValue(rendered.Route.Path, out var planned))
+            {
+                throw new InvalidOperationException($"The renderer returned an unplanned route: {rendered.Route.Path}.");
+            }
+
+            if (!written.Add(planned.ArchivePath))
+            {
+                throw new InvalidOperationException($"Duplicate generated snapshot output: {planned.ArchivePath}.");
+            }
+
+            var bytes = Encoding.UTF8.GetBytes(rendered.Html);
+            var (length, hash) = await WriteBytesEntryAsync(archive, planned.ArchivePath, bytes, cancellationToken).ConfigureAwait(false);
+            manifestEntries.Add(new SnapshotManifestEntry(
+                planned.ArchivePath,
+                SnapshotManifestEntryKind.Snapshot,
+                length,
+                hash,
+                planned.Route));
+            progress?.Report(new SnapshotProgress(SnapshotProgressStage.WritingArchive, $"Wrote {planned.ArchivePath}", ++completed, total, planned.Route));
+        }
+
+        foreach (var missingRoute in plan.RoutesToRender.Where(route => !renderedRoutes.Contains(route.Path)))
+        {
+            renderSummaries.Add(new SnapshotRenderResult(
+                missingRoute,
+                false,
+                null,
+                0,
+                TimeSpan.Zero,
+                SnapshotDiagnosticCodes.BrowserFailure,
+                "No browser worker returned a result."));
+        }
+
+        if (renderSummaries.Any(static result => !result.Succeeded))
+        {
+            archive.Dispose();
+            await file.FlushAsync(cancellationToken).ConfigureAwait(false);
+            return new SnapshotZipWriteResult(null, temporaryPath, renderSummaries);
+        }
+
+        foreach (var planned in plan.GeneratedEntries.Where(static entry => entry.Kind != SnapshotGeneratedEntryKind.Snapshot))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (plan.SourceEntries.Contains(planned.ArchivePath) || !written.Add(planned.ArchivePath))
@@ -110,21 +178,7 @@ public sealed class SnapshotZipWriter
                 continue;
             }
 
-            string content;
-            if (planned.Kind == SnapshotGeneratedEntryKind.Snapshot)
-            {
-                if (planned.Route is null || !renderByRoute.TryGetValue(planned.Route, out var rendered) || !rendered.Succeeded || rendered.Html is null)
-                {
-                    throw new InvalidOperationException($"No successful render was available for {planned.Route}.");
-                }
-
-                content = rendered.Html;
-            }
-            else
-            {
-                content = planned.Content ?? throw new InvalidOperationException($"Generated entry {planned.ArchivePath} had no content.");
-            }
-
+            var content = planned.Content ?? throw new InvalidOperationException($"Generated entry {planned.ArchivePath} had no content.");
             var bytes = Encoding.UTF8.GetBytes(content);
             var (length, hash) = await WriteBytesEntryAsync(archive, planned.ArchivePath, bytes, cancellationToken).ConfigureAwait(false);
             manifestEntries.Add(new SnapshotManifestEntry(
@@ -172,7 +226,7 @@ public sealed class SnapshotZipWriter
         archive.Dispose();
         await file.FlushAsync(cancellationToken).ConfigureAwait(false);
         _logger.Log(new SnapshotLogEntry(SnapshotLogLevel.Information, $"Created temporary artifact {temporaryPath}."));
-        return (manifest, temporaryPath);
+        return new SnapshotZipWriteResult(manifest, temporaryPath, renderSummaries);
     }
 
     private static SnapshotManifestEntryKind MapKind(SnapshotGeneratedEntryKind kind) => kind switch
