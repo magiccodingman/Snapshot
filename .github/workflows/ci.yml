@@ -57,10 +57,33 @@ jobs:
           New-Item -ItemType Directory -Force artifacts/packages | Out-Null
           dotnet pack src/Snapshot.Protocol/Snapshot.Protocol.csproj -c Release --no-restore -o artifacts/packages --verbosity quiet *> pack.log
           if ($LASTEXITCODE -eq 0) { dotnet pack src/Snapshot.Playwright/Snapshot.Playwright.csproj -c Release --no-restore -o artifacts/packages --verbosity quiet *>> pack.log }
-          if ($LASTEXITCODE -eq 0) { dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release --no-restore -o artifacts/packages --verbosity quiet *>> pack.log }
+          if ($LASTEXITCODE -eq 0) {
+            dotnet clean src/Snapshot.Cli/Snapshot.Cli.csproj -c Release -p:PlaywrightPlatform=none --verbosity quiet *>> pack.log
+            dotnet clean src/Snapshot.Playwright/Snapshot.Playwright.csproj -c Release -p:PlaywrightPlatform=none --verbosity quiet *>> pack.log
+            dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release --no-restore -p:PlaywrightPlatform=none -o artifacts/packages --verbosity quiet *>> pack.log
+          }
           if ($LASTEXITCODE -ne 0) {
             Get-Content pack.log | Select-String -Pattern 'error|NU\d{4}|MSB\d{4}'
             exit $LASTEXITCODE
+          }
+      - name: Validate compact CLI package
+        if: matrix.os == 'ubuntu-latest'
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $package = Get-ChildItem artifacts/packages/Snapshot.Cli.*.nupkg | Select-Object -Single
+          if ($package.Length -gt 10MB) {
+            throw "Snapshot.Cli package is unexpectedly large: $([Math]::Round($package.Length / 1MB, 2)) MB"
+          }
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($package.FullName)
+          try {
+            $bundledDrivers = @($archive.Entries | Where-Object { $_.FullName -like '*/.playwright/node/*' })
+            if ($bundledDrivers.Count -gt 0) {
+              throw "Snapshot.Cli unexpectedly contains bundled Playwright drivers."
+            }
+          }
+          finally {
+            $archive.Dispose()
           }
       - name: Install packed CLI from local feed
         if: matrix.os == 'ubuntu-latest'
