@@ -59,8 +59,8 @@ jobs:
           if ($LASTEXITCODE -eq 0) { dotnet pack src/Snapshot.Playwright/Snapshot.Playwright.csproj -c Release --no-restore -o artifacts/packages --verbosity quiet *>> pack.log }
           if ($LASTEXITCODE -eq 0) {
             dotnet clean src/Snapshot.Cli/Snapshot.Cli.csproj -c Release -p:PlaywrightPlatform=none --verbosity quiet *>> pack.log
-            dotnet clean src/Snapshot.Playwright/Snapshot.Playwright.csproj -c Release -p:PlaywrightPlatform=none --verbosity quiet *>> pack.log
-            dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release --no-restore -p:PlaywrightPlatform=none -o artifacts/packages --verbosity quiet *>> pack.log
+            dotnet clean src/Snapshot.Playwright/Snapshot.Playwright.csproj -c Release -p:PlaywrightPlatform=none -p:SnapshotExcludePlaywrightLauncher=true --verbosity quiet *>> pack.log
+            dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release --no-restore -p:PlaywrightPlatform=none -p:SnapshotExcludePlaywrightLauncher=true -o artifacts/packages --verbosity quiet *>> pack.log
           }
           if ($LASTEXITCODE -ne 0) {
             Get-Content pack.log | Select-String -Pattern 'error|NU\d{4}|MSB\d{4}'
@@ -71,24 +71,33 @@ jobs:
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $package = Get-ChildItem artifacts/packages/Snapshot.Cli.*.nupkg | Select-Object -Single
+          $package = Get-ChildItem artifacts/packages/Snapshot.Cli.*.nupkg | Select-Object -First 1
+          if ($null -eq $package) {
+            throw "Snapshot.Cli package was not produced."
+          }
+
           $archive = [System.IO.Compression.ZipFile]::OpenRead($package.FullName)
           try {
             $playwrightEntries = @($archive.Entries | Where-Object { $_.FullName -like '*/.playwright/*' } | ForEach-Object FullName)
+            $launcherEntries = @($archive.Entries | Where-Object { $_.Name -ieq 'playwright.ps1' } | ForEach-Object FullName)
             @(
               "package=$($package.FullName)",
               "bytes=$($package.Length)",
               "megabytes=$([Math]::Round($package.Length / 1MB, 2))",
               "playwrightEntries=$($playwrightEntries.Count)",
-              $playwrightEntries
+              "launcherEntries=$($launcherEntries.Count)",
+              $playwrightEntries,
+              $launcherEntries
             ) | Set-Content package-validation.log
 
             if ($package.Length -gt 10MB) {
               throw "Snapshot.Cli package is unexpectedly large: $([Math]::Round($package.Length / 1MB, 2)) MB"
             }
-            $bundledDrivers = @($playwrightEntries | Where-Object { $_ -like '*/.playwright/node/*' })
-            if ($bundledDrivers.Count -gt 0) {
-              throw "Snapshot.Cli unexpectedly contains bundled Playwright drivers."
+            if ($playwrightEntries.Count -gt 0) {
+              throw "Snapshot.Cli unexpectedly contains bundled Playwright driver assets."
+            }
+            if ($launcherEntries.Count -gt 0) {
+              throw "Snapshot.Cli unexpectedly contains playwright.ps1."
             }
           }
           finally {
