@@ -5,4 +5,5 @@
   <url><loc>https://example.test/delayed</loc></url>
   <url><loc>https://example.test/MyPath</loc></url>
   <url><loc>https://example.test/Products/SpecialOffer</loc></url>
+  <url><loc>https://example.test/caf%C3%A9</loc></url>
 </urlset>
