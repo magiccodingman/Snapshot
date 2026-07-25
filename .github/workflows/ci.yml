@@ -52,13 +52,24 @@ jobs:
         run: dotnet test Snapshot.sln -c Release --no-build --filter "FullyQualifiedName!~SnapshotEndToEndTests" --verbosity quiet
       - name: Pack
         if: matrix.os == 'ubuntu-latest'
-        shell: bash
+        shell: pwsh
         run: |
-          dotnet pack src/Snapshot.Protocol/Snapshot.Protocol.csproj -c Release --no-build -o artifacts/packages --verbosity quiet
-          dotnet pack src/Snapshot.Playwright/Snapshot.Playwright.csproj -c Release --no-build -o artifacts/packages --verbosity quiet
-          dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release --no-build -o artifacts/packages --verbosity quiet
+          New-Item -ItemType Directory -Force artifacts/packages | Out-Null
+          dotnet pack src/Snapshot.Protocol/Snapshot.Protocol.csproj -c Release --no-build -o artifacts/packages --verbosity quiet *> pack.log
+          if ($LASTEXITCODE -eq 0) { dotnet pack src/Snapshot.Playwright/Snapshot.Playwright.csproj -c Release --no-build -o artifacts/packages --verbosity quiet *>> pack.log }
+          if ($LASTEXITCODE -eq 0) { dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release --no-build -o artifacts/packages --verbosity quiet *>> pack.log }
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content pack.log | Select-String -Pattern 'error|NU\d{4}|MSB\d{4}'
+            exit $LASTEXITCODE
+          }
+      - name: Upload pack diagnostics
+        if: failure() && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v7
+        with:
+          name: pack-diagnostics
+          path: pack.log
       - uses: actions/upload-artifact@v7
-        if: matrix.os == 'ubuntu-latest'
+        if: success() && matrix.os == 'ubuntu-latest'
         with:
           name: packages
           path: artifacts/packages
