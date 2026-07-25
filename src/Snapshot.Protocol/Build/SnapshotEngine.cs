@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using Snapshot.Protocol.Abstractions;
 using Snapshot.Protocol.Diagnostics;
@@ -84,11 +85,11 @@ public sealed partial class SnapshotEngine
 
             progress?.Report(new SnapshotProgress(
                 SnapshotProgressStage.StartingBrowser,
-                $"Rendering {plan.RoutesToRender.Count} routes."));
+                $"Preparing the streaming render pipeline for {plan.RoutesToRender.Count} routes."));
 
             var renderResults = plan.RoutesToRender.Count == 0
-                ? Array.Empty<SnapshotRenderResult>()
-                : await _renderer.RenderAsync(
+                ? EmptyRenderResults(cancellationToken)
+                : _renderer.RenderAsync(
                     new SnapshotRenderRequest(
                         sourceDirectory,
                         plan.RoutesToRender,
@@ -96,9 +97,21 @@ public sealed partial class SnapshotEngine
                         request.Retry,
                         request.Concurrency),
                     progress,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken);
 
-            foreach (var rendered in renderResults)
+            progress?.Report(new SnapshotProgress(SnapshotProgressStage.WritingArchive, "Streaming source and rendered entries into the ZIP artifact."));
+            var writer = new SnapshotZipWriter(_logger);
+            temporaryPath = outputPath + ".partial";
+            var written = await writer.WriteAsync(
+                request,
+                plan,
+                renderResults,
+                outputPath,
+                siteVersion,
+                progress,
+                cancellationToken).ConfigureAwait(false);
+
+            foreach (var rendered in written.RenderResults)
             {
                 routeResults.Add(new SnapshotRouteResult(
                     rendered.Route.Path,
@@ -126,22 +139,21 @@ public sealed partial class SnapshotEngine
                 routeResults.Add(new SnapshotRouteResult(manual.Path, manual.OutputPath.Value, true, 0, TimeSpan.Zero));
             }
 
-            if (HasErrors(diagnostics))
+            if (HasErrors(diagnostics) || written.Manifest is null)
             {
-                return Failed(stopwatch, diagnostics, routeResults);
-            }
+                if (!request.PreservePartialArtifact && File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                    temporaryPath = null;
+                }
 
-            progress?.Report(new SnapshotProgress(SnapshotProgressStage.WritingArchive, "Streaming source and generated entries into the ZIP artifact."));
-            var writer = new SnapshotZipWriter(_logger);
-            var written = await writer.WriteAsync(
-                request,
-                plan,
-                renderResults,
-                outputPath,
-                siteVersion,
-                progress,
-                cancellationToken).ConfigureAwait(false);
-            temporaryPath = written.TemporaryPath;
+                return Failed(
+                    stopwatch,
+                    diagnostics,
+                    routeResults,
+                    request.PreservePartialArtifact ? written.TemporaryPath : null,
+                    written.Manifest);
+            }
 
             progress?.Report(new SnapshotProgress(SnapshotProgressStage.ValidatingArchive, "Validating archive entries, hashes, and route output."));
             var validator = new SnapshotArchiveValidator();
@@ -199,6 +211,14 @@ public sealed partial class SnapshotEngine
 
             return Failed(stopwatch, diagnostics, routeResults, request.PreservePartialArtifact ? temporaryPath : null);
         }
+    }
+
+    private static async IAsyncEnumerable<SnapshotRenderResult> EmptyRenderResults(
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await Task.CompletedTask.ConfigureAwait(false);
+        yield break;
     }
 
     private static void ValidateRequest(
