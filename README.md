@@ -59,7 +59,7 @@ snapshot browser install
 snapshot build ./publish/wwwroot --output ./site.snapshot.zip
 ```
 
-The first build downloads the matching Playwright Chromium build when it is missing. Interrupted or incomplete installations are revalidated and repaired before rendering.
+The CLI package intentionally does not embed enormous platform-specific Playwright drivers or Chromium builds. Before the first browser operation it locates the exact Microsoft.Playwright driver in the NuGet cache, or downloads that matching package from NuGet's stable package endpoint into Snapshot's per-user cache. Chromium is provisioned separately, then a real browser launch is validated before rendering. Interrupted or incomplete driver and browser installations are detected and repaired.
 
 ## .NET API
 
