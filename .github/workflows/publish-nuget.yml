@@ -41,7 +41,25 @@ jobs:
       - name: Publish packages
         shell: bash
         run: |
-          dotnet nuget push 'artifacts/packages/*.nupkg' \
-            --api-key '${{ steps.login.outputs.NUGET_API_KEY }}' \
-            --source https://api.nuget.org/v3/index.json \
-            --skip-duplicate
+          set -euo pipefail
+          version="$(sed -n 's:.*<SnapshotPackageVersion>\(.*\)</SnapshotPackageVersion>.*:\1:p' eng/Versions.props)"
+          cli_pointer="artifacts/packages/Snapshot.Cli.${version}.nupkg"
+
+          # Publish dependencies and RID-specific CLI packages before the top-level
+          # pointer package so dotnet tool install can always resolve its platform.
+          for package in artifacts/packages/*.nupkg; do
+            if [[ "$package" == "$cli_pointer" ]]; then
+              continue
+            fi
+            dotnet nuget push "$package" \
+              --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          done
+
+          if [[ -f "$cli_pointer" ]]; then
+            dotnet nuget push "$cli_pointer" \
+              --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          fi
