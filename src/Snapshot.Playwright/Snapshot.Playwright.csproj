@@ -13,5 +13,6 @@
     <ProjectReference Include="../Snapshot.Protocol/Snapshot.Protocol.csproj" />
     <PackageReference Include="Microsoft.Playwright" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <AssemblyMetadata Include="MicrosoftPlaywrightPackageVersion" Value="$(PlaywrightPackageVersion)" />
   </ItemGroup>
 </Project>
