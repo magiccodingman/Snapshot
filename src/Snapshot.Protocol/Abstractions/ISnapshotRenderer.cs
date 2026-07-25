@@ -5,9 +5,26 @@ namespace Snapshot.Protocol.Abstractions;
 
 public interface ISnapshotRenderer
 {
-    Task<IReadOnlyList<SnapshotRenderResult>> RenderAsync(SnapshotRenderRequest request, IProgress<SnapshotProgress>? progress, CancellationToken cancellationToken);
+    IAsyncEnumerable<SnapshotRenderResult> RenderAsync(
+        SnapshotRenderRequest request,
+        IProgress<SnapshotProgress>? progress,
+        CancellationToken cancellationToken);
 }
 
-public sealed record SnapshotRenderRequest(string SourceDirectory, IReadOnlyList<SnapshotRoute> Routes, SnapshotTimeoutOptions Timeouts, SnapshotRetryOptions Retry, int? Concurrency);
+public sealed record SnapshotRenderRequest(
+    string SourceDirectory,
+    IReadOnlyList<SnapshotRoute> Routes,
+    SnapshotTimeoutOptions Timeouts,
+    SnapshotRetryOptions Retry,
+    int? Concurrency);
 
-public sealed record SnapshotRenderResult(SnapshotRoute Route, bool Succeeded, string? Html, int Attempts, TimeSpan Elapsed, string? ErrorCode = null, string? ErrorMessage = null, IReadOnlyList<string>? ConsoleErrors = null, IReadOnlyList<string>? FailedRequests = null);
+public sealed record SnapshotRenderResult(
+    SnapshotRoute Route,
+    bool Succeeded,
+    string? Html,
+    int Attempts,
+    TimeSpan Elapsed,
+    string? ErrorCode = null,
+    string? ErrorMessage = null,
+    IReadOnlyList<string>? ConsoleErrors = null,
+    IReadOnlyList<string>? FailedRequests = null);
