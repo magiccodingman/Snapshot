@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Microsoft.Playwright;
 using Snapshot.Playwright.Browser;
@@ -6,7 +6,6 @@ using Snapshot.Playwright.Hosting;
 using Snapshot.Playwright.Setup;
 using Snapshot.Protocol.Abstractions;
 using Snapshot.Protocol.Build;
-using Snapshot.Protocol.Diagnostics;
 using Snapshot.Protocol.Routes;
 
 namespace Snapshot.Playwright.Rendering;
@@ -22,7 +21,10 @@ public sealed class PlaywrightSnapshotRenderer : ISnapshotRenderer
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<SnapshotRenderResult>> RenderAsync(SnapshotRenderRequest request, IProgress<SnapshotProgress>? progress, CancellationToken cancellationToken)
+    public async IAsyncEnumerable<SnapshotRenderResult> RenderAsync(
+        SnapshotRenderRequest request,
+        IProgress<SnapshotProgress>? progress,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var installer = new PlaywrightBrowserInstaller(_logger);
         await installer.EnsureInstalledAsync(_options, cancellationToken).ConfigureAwait(false);
@@ -33,23 +35,52 @@ public sealed class PlaywrightSnapshotRenderer : ISnapshotRenderer
             Headless = _options.Headless,
             ExecutablePath = _options.BrowserInstallMode == BrowserInstallMode.CustomExecutable ? _options.BrowserExecutablePath : null
         }).ConfigureAwait(false);
+
         try
         {
             var concurrency = request.Concurrency ?? _options.Concurrency ?? Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
             concurrency = Math.Clamp(concurrency, 1, Math.Max(1, request.Routes.Count));
-            var channel = Channel.CreateBounded<SnapshotRoute>(new BoundedChannelOptions(Math.Max(concurrency * 2, 4)) { SingleWriter = true, SingleReader = false, FullMode = BoundedChannelFullMode.Wait });
-            var results = new ConcurrentDictionary<string, SnapshotRenderResult>(StringComparer.Ordinal);
+
+            var routeChannel = Channel.CreateUnbounded<SnapshotRoute>(new UnboundedChannelOptions
+            {
+                SingleWriter = true,
+                SingleReader = false,
+                AllowSynchronousContinuations = false
+            });
+            var resultChannel = Channel.CreateBounded<SnapshotRenderResult>(new BoundedChannelOptions(Math.Max(concurrency * 2, 4))
+            {
+                SingleWriter = false,
+                SingleReader = true,
+                FullMode = BoundedChannelFullMode.Wait,
+                AllowSynchronousContinuations = false
+            });
+
+            foreach (var route in request.Routes)
+            {
+                routeChannel.Writer.TryWrite(route);
+            }
+            routeChannel.Writer.Complete();
+
             var completed = 0;
             var workers = Enumerable.Range(0, concurrency)
-                .Select(workerId => RunWorkerAsync(workerId, browser, host.BaseUri, request, channel.Reader, results, progress, () => Interlocked.Increment(ref completed), cancellationToken))
+                .Select(workerId => RunWorkerAsync(
+                    workerId,
+                    browser,
+                    host.BaseUri,
+                    request,
+                    routeChannel.Reader,
+                    resultChannel.Writer,
+                    progress,
+                    () => Interlocked.Increment(ref completed),
+                    cancellationToken))
                 .ToArray();
-            foreach (var route in request.Routes) await channel.Writer.WriteAsync(route, cancellationToken).ConfigureAwait(false);
-            channel.Writer.Complete();
-            await Task.WhenAll(workers).ConfigureAwait(false);
-            return request.Routes.Select(route => results.TryGetValue(route.Path, out var result)
-                    ? result
-                    : new SnapshotRenderResult(route, false, null, 0, TimeSpan.Zero, SnapshotDiagnosticCodes.BrowserFailure, "No browser worker returned a result."))
-                .ToArray();
+
+            var completion = CompleteResultsAsync(workers, resultChannel.Writer);
+            await foreach (var result in resultChannel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                yield return result;
+            }
+            await completion.ConfigureAwait(false);
         }
         finally
         {
@@ -57,18 +88,49 @@ public sealed class PlaywrightSnapshotRenderer : ISnapshotRenderer
         }
     }
 
-    private async Task RunWorkerAsync(int workerId, IBrowser browser, Uri baseUri, SnapshotRenderRequest request, ChannelReader<SnapshotRoute> routes, ConcurrentDictionary<string, SnapshotRenderResult> results, IProgress<SnapshotProgress>? progress, Func<int> incrementCompleted, CancellationToken cancellationToken)
+    private static async Task CompleteResultsAsync(Task[] workers, ChannelWriter<SnapshotRenderResult> output)
     {
-        await using var context = await browser.NewContextAsync(new BrowserNewContextOptions { IgnoreHTTPSErrors = true, ServiceWorkers = ServiceWorkerPolicy.Block }).ConfigureAwait(false);
-        var worker = new BrowserWorker(workerId, context, baseUri, request.Timeouts, _logger);
+        try
+        {
+            await Task.WhenAll(workers).ConfigureAwait(false);
+            output.TryComplete();
+        }
+        catch (Exception exception)
+        {
+            output.TryComplete(exception);
+        }
+    }
+
+    private async Task RunWorkerAsync(
+        int workerId,
+        IBrowser browser,
+        Uri baseUri,
+        SnapshotRenderRequest request,
+        ChannelReader<SnapshotRoute> routes,
+        ChannelWriter<SnapshotRenderResult> results,
+        IProgress<SnapshotProgress>? progress,
+        Func<int> incrementCompleted,
+        CancellationToken cancellationToken)
+    {
+        await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            IgnoreHTTPSErrors = true,
+            ServiceWorkers = ServiceWorkerPolicy.Block
+        }).ConfigureAwait(false);
+        await using var worker = new BrowserWorker(workerId, context, baseUri, request.Timeouts, _logger);
         await worker.InitializeAsync(cancellationToken).ConfigureAwait(false);
+
         await foreach (var route in routes.ReadAllAsync(cancellationToken).ConfigureAwait(false))
         {
             var result = await worker.RenderAsync(route, request.Retry.MaximumAttempts, cancellationToken).ConfigureAwait(false);
-            results[route.Path] = result;
+            await results.WriteAsync(result, cancellationToken).ConfigureAwait(false);
             var completed = incrementCompleted();
-            progress?.Report(new SnapshotProgress(SnapshotProgressStage.Rendering, result.Succeeded ? $"Captured {route.Path}" : $"Failed {route.Path}: {result.ErrorMessage}", completed, request.Routes.Count, route.Path));
+            progress?.Report(new SnapshotProgress(
+                SnapshotProgressStage.Rendering,
+                result.Succeeded ? $"Captured {route.Path}" : $"Failed {route.Path}: {result.ErrorMessage}",
+                completed,
+                request.Routes.Count,
+                route.Path));
         }
-        await worker.DisposeAsync().ConfigureAwait(false);
     }
 }
