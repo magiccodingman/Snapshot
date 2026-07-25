@@ -44,7 +44,7 @@
       const timeoutMs = normalizeTimeout(message.timeoutMs);
       try {
         let readiness;
-        const canUseStartupReadiness = firstRequest && startupReadiness?.isConnected === true && targetPath === window.location.pathname;
+        const canUseStartupReadiness = firstRequest && startupReadiness?.isConnected === true && targetPath === currentRoutePath();
         if (canUseStartupReadiness) {
           window.history.replaceState({}, "", targetPath);
           readiness = startupReadiness;
@@ -64,7 +64,7 @@
           type: "snapshot:result",
           sessionToken: token,
           requestId: message.requestId,
-          capturedPath: `${window.location.pathname}${window.location.search}`,
+          capturedPath: currentRoutePath(),
           protocolVersion: PROTOCOL_VERSION,
           clientVersion: CLIENT_VERSION,
           siteVersion: getSiteVersion(script),
@@ -77,7 +77,7 @@
           type: "snapshot:error",
           sessionToken: token,
           requestId: message.requestId,
-          capturedPath: `${window.location.pathname}${window.location.search}`,
+          capturedPath: currentRoutePath(),
           code: error?.code ?? "SNAPSHOT_FAILED",
           message: error instanceof Error ? error.message : String(error)
         });
@@ -95,8 +95,7 @@
   }
 
   function navigate(targetPath) {
-    const current = `${window.location.pathname}${window.location.search}`;
-    if (current !== targetPath) {
+    if (currentRoutePath() !== targetPath) {
       window.history.pushState({}, "", targetPath);
       window.dispatchEvent(new PopStateEvent("popstate"));
     }
@@ -180,7 +179,7 @@
         const rootVersion = getSiteVersion(rootScript);
         const forceOrigin = rootScript.getAttribute("data-force-origin")?.trim().toLowerCase() === "true";
         if (forceOrigin || (rootVersion && snapshotVersion && rootVersion !== snapshotVersion)) {
-          const route = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+          const route = `${currentRoutePath()}${window.location.hash}`;
           window.location.replace(`/?${RESTORE_ROUTE_QUERY_KEY}=${encodeURIComponent(route)}`);
         }
       })
@@ -203,8 +202,16 @@
     try {
       const parsed = new URL(value, window.location.origin);
       if (parsed.origin !== window.location.origin) return null;
-      return `${parsed.pathname}${parsed.search}`;
+      return `${decodeURI(parsed.pathname)}${parsed.search}`;
     } catch { return null; }
+  }
+
+  function currentRoutePath() {
+    try {
+      return `${decodeURI(window.location.pathname)}${window.location.search}`;
+    } catch {
+      return `${window.location.pathname}${window.location.search}`;
+    }
   }
 
   function normalizeTimeout(value) {
