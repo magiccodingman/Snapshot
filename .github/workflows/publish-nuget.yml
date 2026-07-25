@@ -26,13 +26,26 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
-      - name: Restore, test, and pack
+      - name: Restore and test
         run: |
           dotnet restore Snapshot.sln
           dotnet test Snapshot.sln -c Release --no-restore --filter "FullyQualifiedName!~SnapshotEndToEndTests"
+      - name: Pack libraries and platform CLI packages
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts/packages | Out-Null
           dotnet pack src/Snapshot.Protocol/Snapshot.Protocol.csproj -c Release --no-restore -o artifacts/packages
           dotnet pack src/Snapshot.Playwright/Snapshot.Playwright.csproj -c Release --no-restore -o artifacts/packages
-          dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release --no-restore -o artifacts/packages
+          dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release -p:CreateSnapshotCliPointerPackage=true -o artifacts/packages
+          foreach ($rid in @('win-x64', 'linux-x64', 'linux-arm64', 'osx-x64', 'osx-arm64')) {
+            dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release -r $rid -p:PublishAot=false -p:CreateSnapshotCliPointerPackage=false -o artifacts/packages
+          }
+      - name: Validate packed CLI installation
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path eng/Versions.props -Pattern '<SnapshotPackageVersion>(.*?)</SnapshotPackageVersion>').Matches.Groups[1].Value
+          dotnet tool install Snapshot.Cli --version $version --tool-path artifacts/tool-test --add-source artifacts/packages --ignore-failed-sources
+          ./artifacts/tool-test/snapshot help
       - name: NuGet login using trusted publishing
         uses: NuGet/login@v1
         id: login
