@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="../../eng/Versions.props" />
+  <PropertyGroup>
+    <AssemblyName>Snapshot.Playwright</AssemblyName>
+    <RootNamespace>Snapshot.Playwright</RootNamespace>
+    <PackageId>Snapshot.Playwright</PackageId>
+    <PackageVersion>$(SnapshotPackageVersion)</PackageVersion>
+    <Description>Playwright executor for Snapshot Protocol with local hosting, browser provisioning, retries, and worker pooling.</Description>
+    <PackageTags>snapshot;playwright;chromium;spa;wasm;seo;prerender</PackageTags>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Snapshot.Protocol/Snapshot.Protocol.csproj" />
+    <PackageReference Include="Microsoft.Playwright" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+</Project>
