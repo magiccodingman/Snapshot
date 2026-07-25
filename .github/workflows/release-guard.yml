@@ -1,0 +1,41 @@
+name: Release Guard
+
+on:
+  pull_request:
+    branches: [release]
+
+permissions:
+  contents: read
+
+jobs:
+  versions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Require version bumps for publishable changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='${{ github.event.pull_request.base.sha }}'
+          head='${{ github.event.pull_request.head.sha }}'
+          changed="$(git diff --name-only "$base" "$head")"
+
+          if grep -Eq '^(src/|eng/Versions\.props|Directory\.(Build|Packages)\.props|README\.md$|LICENSE$|128x128_compressed\.png$)' <<<"$changed"; then
+            old_version="$(git show "${base}:eng/Versions.props" 2>/dev/null | sed -n 's:.*<SnapshotPackageVersion>\(.*\)</SnapshotPackageVersion>.*:\1:p' || true)"
+            new_version="$(sed -n 's:.*<SnapshotPackageVersion>\(.*\)</SnapshotPackageVersion>.*:\1:p' eng/Versions.props)"
+            if [[ -n "$old_version" && "$old_version" == "$new_version" ]]; then
+              echo "Publishable .NET files changed without bumping SnapshotPackageVersion ($new_version)."
+              exit 1
+            fi
+          fi
+
+          if grep -Eq '^(client/(src/|package\.json|build\.mjs)|README\.md$|LICENSE$|128x128_compressed\.png$)' <<<"$changed"; then
+            old_version="$(git show "${base}:client/package.json" 2>/dev/null | jq -r .version 2>/dev/null || true)"
+            new_version="$(jq -r .version client/package.json)"
+            if [[ -n "$old_version" && "$old_version" == "$new_version" ]]; then
+              echo "The browser client changed without bumping client/package.json ($new_version)."
+              exit 1
+            fi
+          fi

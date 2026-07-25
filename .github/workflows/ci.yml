@@ -1,0 +1,154 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, release]
+  push:
+    branches: [main, release]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - name: Build and test client
+        working-directory: client
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - name: Restore
+        shell: pwsh
+        run: |
+          dotnet restore Snapshot.sln --verbosity quiet *> restore.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content restore.log | Select-String -Pattern 'error|NU\d{4}|MSB\d{4}'
+            exit $LASTEXITCODE
+          }
+      - name: Upload restore diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: restore-${{ matrix.os }}
+          path: restore.log
+      - name: Build
+        run: dotnet build Snapshot.sln -c Release --no-restore --verbosity quiet
+      - name: Test
+        run: dotnet test Snapshot.sln -c Release --no-build --filter "FullyQualifiedName!~SnapshotEndToEndTests" --verbosity quiet
+      - name: Pack
+        if: matrix.os == 'ubuntu-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts/packages | Out-Null
+          dotnet pack src/Snapshot.Protocol/Snapshot.Protocol.csproj -c Release --no-restore -o artifacts/packages --verbosity quiet *> pack.log
+          if ($LASTEXITCODE -eq 0) { dotnet pack src/Snapshot.Playwright/Snapshot.Playwright.csproj -c Release --no-restore -o artifacts/packages --verbosity quiet *>> pack.log }
+          if ($LASTEXITCODE -eq 0) {
+            dotnet clean src/Snapshot.Cli/Snapshot.Cli.csproj -c Release -p:PlaywrightPlatform=none --verbosity quiet *>> pack.log
+            dotnet clean src/Snapshot.Playwright/Snapshot.Playwright.csproj -c Release -p:PlaywrightPlatform=none -p:SnapshotExcludePlaywrightLauncher=true --verbosity quiet *>> pack.log
+            dotnet pack src/Snapshot.Cli/Snapshot.Cli.csproj -c Release --no-restore -p:PlaywrightPlatform=none -p:SnapshotExcludePlaywrightLauncher=true -o artifacts/packages --verbosity quiet *>> pack.log
+          }
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content pack.log | Select-String -Pattern 'error|NU\d{4}|MSB\d{4}'
+            exit $LASTEXITCODE
+          }
+      - name: Validate compact CLI package
+        if: matrix.os == 'ubuntu-latest'
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $package = Get-ChildItem artifacts/packages/Snapshot.Cli.*.nupkg | Select-Object -First 1
+          if ($null -eq $package) {
+            throw "Snapshot.Cli package was not produced."
+          }
+
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($package.FullName)
+          try {
+            $playwrightEntries = @($archive.Entries | Where-Object { $_.FullName -like '*/.playwright/*' } | ForEach-Object FullName)
+            $launcherEntries = @($archive.Entries | Where-Object { $_.Name -ieq 'playwright.ps1' } | ForEach-Object FullName)
+            @(
+              "package=$($package.FullName)",
+              "bytes=$($package.Length)",
+              "megabytes=$([Math]::Round($package.Length / 1MB, 2))",
+              "playwrightEntries=$($playwrightEntries.Count)",
+              "launcherEntries=$($launcherEntries.Count)",
+              $playwrightEntries,
+              $launcherEntries
+            ) | Set-Content package-validation.log
+
+            if ($package.Length -gt 10MB) {
+              throw "Snapshot.Cli package is unexpectedly large: $([Math]::Round($package.Length / 1MB, 2)) MB"
+            }
+            if ($playwrightEntries.Count -gt 0) {
+              throw "Snapshot.Cli unexpectedly contains bundled Playwright driver assets."
+            }
+            if ($launcherEntries.Count -gt 0) {
+              throw "Snapshot.Cli unexpectedly contains playwright.ps1."
+            }
+          }
+          finally {
+            $archive.Dispose()
+          }
+      - name: Install packed CLI from local feed
+        if: matrix.os == 'ubuntu-latest'
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path eng/Versions.props -Pattern '<SnapshotPackageVersion>(.*?)</SnapshotPackageVersion>').Matches.Groups[1].Value
+          dotnet tool install Snapshot.Cli --version $version --tool-path artifacts/tool-test --add-source artifacts/packages --ignore-failed-sources
+          ./artifacts/tool-test/snapshot help
+      - name: Upload pack diagnostics
+        if: failure() && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v7
+        with:
+          name: pack-diagnostics
+          path: |
+            pack.log
+            package-validation.log
+            artifacts/packages/Snapshot.Cli.*.nupkg
+      - uses: actions/upload-artifact@v7
+        if: success() && matrix.os == 'ubuntu-latest'
+        with:
+          name: packages
+          path: artifacts/packages
+
+  end-to-end:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - name: Restore and build
+        shell: pwsh
+        run: |
+          dotnet build Snapshot.sln -c Release --verbosity quiet *> build.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content build.log | Select-String -Pattern 'error|NU\d{4}|MSB\d{4}|CS\d{4}'
+            exit $LASTEXITCODE
+          }
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: end-to-end-build
+          path: build.log
+      - name: Install Chromium and Linux dependencies
+        run: dotnet run --project src/Snapshot.Cli/Snapshot.Cli.csproj -c Release --no-build -- browser install --with-deps
+      - name: Run browser tests
+        env:
+          SNAPSHOT_E2E: '1'
+        run: dotnet test tests/Snapshot.EndToEndTests/Snapshot.EndToEndTests.csproj -c Release --no-build --verbosity quiet
