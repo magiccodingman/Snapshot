@@ -35,6 +35,7 @@ public sealed class SnapshotEndToEndTests
             ]);
 
             var webRoot = Path.Combine(publishDirectory, "wwwroot");
+            var sourceLoader = await File.ReadAllTextAsync(Path.Combine(webRoot, "index.html"));
             var engine = SnapshotEngine.CreateBuilder().UsePlaywright().Build();
             var result = await engine.BuildAsync(new SnapshotBuildRequest
             {
@@ -45,6 +46,17 @@ public sealed class SnapshotEndToEndTests
             });
 
             Assert.True(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(diagnostic => $"{diagnostic.Code}: {diagnostic.Message}")));
+
+            await using (var archive = await SnapshotArchive.OpenAsync(output))
+            {
+                var archivedLoader = await archive.ReadTextAsync("index.html");
+                var rootGateway = await archive.ReadTextAsync("index/index.html");
+                Assert.Equal(sourceLoader, archivedLoader);
+                Assert.Contains("data-test-page-id=\"home\"", rootGateway, StringComparison.Ordinal);
+                Assert.Contains("data-snapshot-route=\"/\"", rootGateway, StringComparison.Ordinal);
+                Assert.Contains("snapshot:route", rootGateway, StringComparison.Ordinal);
+            }
+
             await using var host = await SnapshotTestHost.StartAsync(new SnapshotTestHostOptions
             {
                 ArchivePath = output,
@@ -52,12 +64,41 @@ public sealed class SnapshotEndToEndTests
             });
 
             using var http = new HttpClient { BaseAddress = host.BaseUri };
+            var rootGatewayResponse = await http.GetStringAsync("/index/");
             var immediate = await http.GetStringAsync("/immediate/");
             var delayed = await http.GetStringAsync("/delayed/");
             var unicode = await http.GetStringAsync("/caf%C3%A9/");
+            Assert.Contains("data-test-page-id=\"home\"", rootGatewayResponse, StringComparison.Ordinal);
             Assert.Contains("data-test-page-id=\"immediate\"", immediate, StringComparison.Ordinal);
             Assert.Contains("data-test-page-id=\"delayed\"", delayed, StringComparison.Ordinal);
             Assert.Contains("data-test-page-id=\"unicode-cafe\"", unicode, StringComparison.Ordinal);
+
+            var noRootOutput = Path.Combine(outputRoot, "no-root-gateway.zip");
+            var noRoot = await engine.BuildAsync(new SnapshotBuildRequest
+            {
+                SourceDirectory = webRoot,
+                OutputPath = noRootOutput,
+                Discovery = new SnapshotRouteDiscoveryOptions
+                {
+                    Mode = SnapshotRouteDiscoveryMode.ExplicitOnly,
+                    AdditionalRoutes = ["/"]
+                },
+                RootGateway = new SnapshotRootGatewayOptions { Enabled = false },
+                CaseAliases = new SnapshotCaseAliasOptions
+                {
+                    Enabled = false,
+                    GenerateMissingPrefixGateways = false
+                },
+                Concurrency = 1
+            });
+
+            Assert.True(noRoot.Succeeded, string.Join(Environment.NewLine, noRoot.Diagnostics.Select(diagnostic => $"{diagnostic.Code}: {diagnostic.Message}")));
+            Assert.Empty(noRoot.Routes);
+            await using (var noRootArchive = await SnapshotArchive.OpenAsync(noRootOutput))
+            {
+                Assert.Equal(sourceLoader, await noRootArchive.ReadTextAsync("index.html"));
+                Assert.Null(noRootArchive.TryGetFile("index/index.html"));
+            }
 
             var failedOutput = Path.Combine(outputRoot, "never-ready.zip");
             var failed = await engine.BuildAsync(new SnapshotBuildRequest

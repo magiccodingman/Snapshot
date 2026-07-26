@@ -8,6 +8,7 @@
   const RESTORE_ROUTE_QUERY_KEY = "snapshot-route";
   const READY_ELEMENT = "snapshot-ready";
   const PROCESSED_ATTRIBUTE = "data-snapshot-processed";
+  const SNAPSHOT_ROUTE_ATTRIBUTE = "data-snapshot-route";
   const SITE_VERSION_META = "snapshot:site-version";
   const ROUTE_META = "snapshot:route";
   const DEFAULT_READY_TIMEOUT_MS = 30_000;
@@ -17,6 +18,7 @@
   const currentUrl = new URL(window.location.href);
   const sessionToken = currentUrl.searchParams.get(ACTIVATION_QUERY_KEY);
 
+  if (!sessionToken) restoreEmbeddedSnapshotRoute();
   restorePreservedRoute();
 
   if (sessionToken) {
@@ -44,7 +46,7 @@
       const timeoutMs = normalizeTimeout(message.timeoutMs);
       try {
         let readiness;
-        const firstRequestTargetsCurrentRoute = firstRequest && targetPath === currentRoutePath();
+        const firstRequestTargetsCurrentRoute = firstRequest && targetPath === currentExecutorRoutePath();
         if (firstRequestTargetsCurrentRoute) {
           window.history.replaceState({}, "", targetPath);
           readiness = startupReadiness?.isConnected === true
@@ -154,6 +156,8 @@
     Array.from(wrapper.childNodes).forEach((node) => head.appendChild(node));
     appendMeta(documentCopy, head, SITE_VERSION_META, getSiteVersion(script) ?? "");
     appendMeta(documentCopy, head, ROUTE_META, capturedRoute);
+    const protocolScript = documentCopy.getElementById(SCRIPT_ID);
+    if (protocolScript) protocolScript.setAttribute(SNAPSHOT_ROUTE_ATTRIBUTE, capturedRoute);
     head.appendChild(documentCopy.createTextNode("\n"));
     head.appendChild(documentCopy.createComment(" End Snapshot Protocol metadata "));
     head.appendChild(documentCopy.createTextNode("\n"));
@@ -182,7 +186,8 @@
         const rootVersion = getSiteVersion(rootScript);
         const forceOrigin = rootScript.getAttribute("data-force-origin")?.trim().toLowerCase() === "true";
         if (forceOrigin || (rootVersion && snapshotVersion && rootVersion !== snapshotVersion)) {
-          const route = `${currentRoutePath()}${window.location.hash}`;
+          const canonicalRoute = getCanonicalSnapshotRoute() ?? currentRoutePath();
+          const route = `${canonicalRoute}${window.location.hash}`;
           window.location.replace(`/?${RESTORE_ROUTE_QUERY_KEY}=${encodeURIComponent(route)}`);
         }
       })
@@ -190,14 +195,28 @@
       .finally(() => clearTimeout(timeout));
   }
 
+  function restoreEmbeddedSnapshotRoute() {
+    const route = getCanonicalSnapshotRoute();
+    if (!route) return;
+    const target = `${route}${window.location.hash}`;
+    const current = `${currentRoutePath()}${window.location.hash}`;
+    if (target !== current) window.history.replaceState({}, "", target);
+  }
+
   function restorePreservedRoute() {
     const route = currentUrl.searchParams.get(RESTORE_ROUTE_QUERY_KEY);
     if (!route) return;
-    const target = normalizeTargetPath(route);
+    const target = normalizePreservedRoute(route);
     if (!target) return;
     window.history.replaceState({}, "", target);
     const dispatch = () => window.dispatchEvent(new PopStateEvent("popstate"));
     if (document.readyState === "loading") window.addEventListener("DOMContentLoaded", dispatch, { once: true }); else queueMicrotask(dispatch);
+  }
+
+  function getCanonicalSnapshotRoute() {
+    const embedded = script?.getAttribute(SNAPSHOT_ROUTE_ATTRIBUTE)?.trim();
+    const metadata = document.querySelector(`meta[name="${ROUTE_META}"]`)?.getAttribute("content")?.trim();
+    return normalizeTargetPath(embedded || metadata);
   }
 
   function normalizeTargetPath(value) {
@@ -207,6 +226,25 @@
       if (parsed.origin !== window.location.origin) return null;
       return `${decodeURI(parsed.pathname)}${parsed.search}`;
     } catch { return null; }
+  }
+
+  function normalizePreservedRoute(value) {
+    if (typeof value !== "string" || value.length === 0) return null;
+    try {
+      const parsed = new URL(value, window.location.origin);
+      if (parsed.origin !== window.location.origin) return null;
+      return `${decodeURI(parsed.pathname)}${parsed.search}${parsed.hash}`;
+    } catch { return null; }
+  }
+
+  function currentExecutorRoutePath() {
+    try {
+      const parsed = new URL(window.location.href);
+      parsed.searchParams.delete(ACTIVATION_QUERY_KEY);
+      return `${decodeURI(parsed.pathname)}${parsed.search}`;
+    } catch {
+      return currentRoutePath();
+    }
   }
 
   function currentRoutePath() {

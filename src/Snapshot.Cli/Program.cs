@@ -87,6 +87,7 @@ internal static class SnapshotCli
             OutputPath = output,
             TargetFilesystem = target,
             Discovery = new SnapshotRouteDiscoveryOptions { Mode = discovery, AdditionalRoutes = input.GetMany("route") },
+            RootGateway = new SnapshotRootGatewayOptions { Enabled = !input.Has("no-root-gateway") },
             CaseAliases = new SnapshotCaseAliasOptions
             {
                 Enabled = !input.Has("no-case-aliases"),
@@ -287,6 +288,7 @@ Build options:
   --target-filesystem <mode>           case-sensitive (default) or windows
   --route <path>                       Repeat for explicit routes
   --route-discovery <mode>             sitemaps-and-explicit, sitemaps-only, explicit-only
+  --no-root-gateway                   Do not generate /index/index.html for route /
   --no-case-aliases
   --no-missing-prefix-gateways
   --maximum-aliases-per-route <count>  No limit by default
