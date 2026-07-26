@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -33,6 +35,7 @@ public sealed class StandardSnapshotProcessor : ISnapshotProcessor
     };
 
     private readonly SnapshotProcessingOptions _options;
+    private readonly ConcurrentDictionary<string, byte> _reportedCssFallbacks = new(StringComparer.Ordinal);
     private readonly AngleHtmlParser _parser = new();
 
     public StandardSnapshotProcessor(SnapshotProcessingOptions? options = null)
@@ -256,22 +259,30 @@ public sealed class StandardSnapshotProcessor : ISnapshotProcessor
             var result = Uglify.Css(source, $"{context.Route.Path}#style-{index}", CreateSafeCssSettings());
             if (result.HasErrors || string.IsNullOrEmpty(result.Code))
             {
-                diagnostics.Add(CreateCssPreservedDiagnostic(
-                    context,
-                    index,
-                    "NUglify rejected the original CSS",
-                    result.Errors.Select(static error => error.ToString())));
+                if (ShouldReportCssFallback(source, "source"))
+                {
+                    diagnostics.Add(CreateCssPreservedDiagnostic(
+                        context,
+                        index,
+                        "NUglify rejected the original CSS",
+                        result.Errors.Select(static error => error.ToString())));
+                }
+
                 continue;
             }
 
             var verification = Uglify.Css(result.Code, $"{context.Route.Path}#style-{index}-verification", CreateSafeCssSettings());
             if (verification.HasErrors)
             {
-                diagnostics.Add(CreateCssPreservedDiagnostic(
-                    context,
-                    index,
-                    "the minified CSS failed NUglify's verification pass",
-                    verification.Errors.Select(static error => error.ToString())));
+                if (ShouldReportCssFallback(source, "verification"))
+                {
+                    diagnostics.Add(CreateCssPreservedDiagnostic(
+                        context,
+                        index,
+                        "the minified CSS failed NUglify's verification pass",
+                        verification.Errors.Select(static error => error.ToString())));
+                }
+
                 continue;
             }
 
@@ -343,6 +354,13 @@ public sealed class StandardSnapshotProcessor : ISnapshotProcessor
 
             MinifyHtmlNode(child, childPreservesWhitespace, cancellationToken);
         }
+    }
+
+    private bool ShouldReportCssFallback(string source, string stage)
+    {
+        var bytes = Encoding.UTF8.GetBytes(source);
+        var hash = Convert.ToHexString(SHA256.HashData(bytes));
+        return _reportedCssFallbacks.TryAdd($"{stage}:{hash}", 0);
     }
 
     private static SnapshotDiagnostic CreateCssPreservedDiagnostic(
