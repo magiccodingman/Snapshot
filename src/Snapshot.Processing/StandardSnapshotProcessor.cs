@@ -2,13 +2,13 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using AngleSharp.Dom;
-using AngleSharp.Html.Parser;
 using NUglify;
 using NUglify.Css;
 using NUglify.Html;
 using Snapshot.Protocol.Diagnostics;
 using Snapshot.Protocol.Processing;
 using Snapshot.Protocol.Routes;
+using AngleHtmlParser = AngleSharp.Html.Parser.HtmlParser;
 
 namespace Snapshot.Processing;
 
@@ -16,7 +16,7 @@ public sealed class StandardSnapshotProcessor : ISnapshotProcessor
 {
     private static readonly JsonSerializerOptions CompactJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly SnapshotProcessingOptions _options;
-    private readonly HtmlParser _parser = new();
+    private readonly AngleHtmlParser _parser = new();
 
     public StandardSnapshotProcessor(SnapshotProcessingOptions? options = null)
     {
@@ -52,9 +52,10 @@ public sealed class StandardSnapshotProcessor : ISnapshotProcessor
         }
 
         ValidateCanonical(document, context, diagnostics);
-        ProcessInlineJson(document, context, diagnostics);
-        ProcessInlineCss(document, context, diagnostics);
+        ProcessInlineJson(document, context, diagnostics, cancellationToken);
+        ProcessInlineCss(document, context, diagnostics, cancellationToken);
 
+        cancellationToken.ThrowIfCancellationRequested();
         var preparedHtml = SerializeDocument(document);
         var processedHtml = ProcessHtml(preparedHtml, context, diagnostics);
         var processedLength = Encoding.UTF8.GetByteCount(processedHtml);
@@ -176,7 +177,8 @@ public sealed class StandardSnapshotProcessor : ISnapshotProcessor
     private void ProcessInlineJson(
         IDocument document,
         SnapshotProcessingContext context,
-        ICollection<SnapshotDiagnostic> diagnostics)
+        ICollection<SnapshotDiagnostic> diagnostics,
+        CancellationToken cancellationToken)
     {
         if (!_options.ValidateInlineJson && !_options.MinifyInlineJson)
         {
@@ -186,7 +188,7 @@ public sealed class StandardSnapshotProcessor : ISnapshotProcessor
         var index = 0;
         foreach (var script in document.QuerySelectorAll("script[type]").Where(IsJsonScript))
         {
-            cancellationPoint();
+            cancellationToken.ThrowIfCancellationRequested();
             index++;
             var source = script.TextContent;
             try
@@ -210,19 +212,13 @@ public sealed class StandardSnapshotProcessor : ISnapshotProcessor
                     context.Route.OutputPath.Value));
             }
         }
-
-        return;
-
-        static void cancellationPoint()
-        {
-            // Kept as a local boundary so cancellation checks can be added without changing processing semantics.
-        }
     }
 
     private void ProcessInlineCss(
         IDocument document,
         SnapshotProcessingContext context,
-        ICollection<SnapshotDiagnostic> diagnostics)
+        ICollection<SnapshotDiagnostic> diagnostics,
+        CancellationToken cancellationToken)
     {
         if (!_options.MinifyInlineCss)
         {
@@ -232,6 +228,7 @@ public sealed class StandardSnapshotProcessor : ISnapshotProcessor
         var index = 0;
         foreach (var style in document.QuerySelectorAll("style"))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             index++;
             var source = style.TextContent;
             if (string.IsNullOrWhiteSpace(source))
@@ -239,8 +236,7 @@ public sealed class StandardSnapshotProcessor : ISnapshotProcessor
                 continue;
             }
 
-            var settings = CreateSafeCssSettings();
-            var result = Uglify.Css(source, $"{context.Route.Path}#style-{index}", settings);
+            var result = Uglify.Css(source, $"{context.Route.Path}#style-{index}", CreateSafeCssSettings());
             if (result.HasErrors || string.IsNullOrEmpty(result.Code))
             {
                 diagnostics.Add(new SnapshotDiagnostic(
@@ -280,8 +276,7 @@ public sealed class StandardSnapshotProcessor : ISnapshotProcessor
             return preparedHtml;
         }
 
-        var baseline = _parser.ParseDocument(preparedHtml);
-        var baselineFingerprint = CreateFingerprint(baseline);
+        var baselineFingerprint = CreateFingerprint(_parser.ParseDocument(preparedHtml));
         var result = Uglify.Html(preparedHtml, CreateSafeHtmlSettings());
         if (result.HasErrors || string.IsNullOrEmpty(result.Code))
         {
@@ -295,8 +290,7 @@ public sealed class StandardSnapshotProcessor : ISnapshotProcessor
             return preparedHtml;
         }
 
-        var verification = _parser.ParseDocument(result.Code);
-        var verificationFingerprint = CreateFingerprint(verification);
+        var verificationFingerprint = CreateFingerprint(_parser.ParseDocument(result.Code));
         if (!baselineFingerprint.IsEquivalentTo(verificationFingerprint))
         {
             diagnostics.Add(new SnapshotDiagnostic(
