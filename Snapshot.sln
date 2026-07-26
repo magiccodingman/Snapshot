@@ -4,11 +4,15 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Snapshot.Protocol", "src\Snapshot.Protocol\Snapshot.Protocol.csproj", "{4346526A-D979-5352-B0F5-EFCB8B859339}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Snapshot.Processing", "src\Snapshot.Processing\Snapshot.Processing.csproj", "{B2EA5B1D-46FC-40A8-A6D0-7A65BDB779E7}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Snapshot.Playwright", "src\Snapshot.Playwright\Snapshot.Playwright.csproj", "{AF8A095B-071D-59DB-A700-97E540157B3F}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Snapshot.Cli", "src\Snapshot.Cli\Snapshot.Cli.csproj", "{C6C302AC-96EA-5094-925B-259F76A842CD}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Snapshot.Protocol.Tests", "tests\Snapshot.Protocol.Tests\Snapshot.Protocol.Tests.csproj", "{D962A2E5-1E96-510A-95C7-5D6ADE05C538}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Snapshot.Processing.Tests", "tests\Snapshot.Processing.Tests\Snapshot.Processing.Tests.csproj", "{80A5DFBB-EC87-4038-A49B-C826D8C9E1C5}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Snapshot.Archive.Tests", "tests\Snapshot.Archive.Tests\Snapshot.Archive.Tests.csproj", "{EBA4A3AE-BE90-5EC4-AEE1-C06DE9ED91BB}"
 EndProject
@@ -30,6 +34,10 @@ Global
 		{4346526A-D979-5352-B0F5-EFCB8B859339}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4346526A-D979-5352-B0F5-EFCB8B859339}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4346526A-D979-5352-B0F5-EFCB8B859339}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B2EA5B1D-46FC-40A8-A6D0-7A65BDB779E7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B2EA5B1D-46FC-40A8-A6D0-7A65BDB779E7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B2EA5B1D-46FC-40A8-A6D0-7A65BDB779E7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B2EA5B1D-46FC-40A8-A6D0-7A65BDB779E7}.Release|Any CPU.Build.0 = Release|Any CPU
 		{AF8A095B-071D-59DB-A700-97E540157B3F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{AF8A095B-071D-59DB-A700-97E540157B3F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{AF8A095B-071D-59DB-A700-97E540157B3F}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -42,6 +50,10 @@ Global
 		{D962A2E5-1E96-510A-95C7-5D6ADE05C538}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D962A2E5-1E96-510A-95C7-5D6ADE05C538}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D962A2E5-1E96-510A-95C7-5D6ADE05C538}.Release|Any CPU.Build.0 = Release|Any CPU
+		{80A5DFBB-EC87-4038-A49B-C826D8C9E1C5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{80A5DFBB-EC87-4038-A49B-C826D8C9E1C5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{80A5DFBB-EC87-4038-A49B-C826D8C9E1C5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{80A5DFBB-EC87-4038-A49B-C826D8C9E1C5}.Release|Any CPU.Build.0 = Release|Any CPU
 		{EBA4A3AE-BE90-5EC4-AEE1-C06DE9ED91BB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{EBA4A3AE-BE90-5EC4-AEE1-C06DE9ED91BB}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{EBA4A3AE-BE90-5EC4-AEE1-C06DE9ED91BB}.Release|Any CPU.ActiveCfg = Release|Any CPU
