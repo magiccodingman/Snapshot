@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Snapshot.Protocol.Abstractions;
 using Snapshot.Protocol.Diagnostics;
 using Snapshot.Protocol.Output;
+using Snapshot.Protocol.Processing;
 using Snapshot.Protocol.Protocol;
 using Snapshot.Protocol.Routes;
 using Snapshot.Protocol.Validation;
@@ -13,11 +14,13 @@ namespace Snapshot.Protocol.Build;
 public sealed partial class SnapshotEngine
 {
     private readonly ISnapshotRenderer _renderer;
+    private readonly ISnapshotProcessor _processor;
     private readonly ISnapshotLogger _logger;
 
-    internal SnapshotEngine(ISnapshotRenderer renderer, ISnapshotLogger logger)
+    internal SnapshotEngine(ISnapshotRenderer renderer, ISnapshotProcessor processor, ISnapshotLogger logger)
     {
         _renderer = renderer;
+        _processor = processor;
         _logger = logger;
     }
 
@@ -110,7 +113,7 @@ public sealed partial class SnapshotEngine
                     cancellationToken);
 
             progress?.Report(new SnapshotProgress(SnapshotProgressStage.WritingArchive, "Streaming source and rendered entries into the ZIP artifact."));
-            var writer = new SnapshotZipWriter(_logger);
+            var writer = new SnapshotZipWriter(_logger, _processor);
             temporaryPath = outputPath + ".partial";
             var written = await writer.WriteAsync(
                 request,
@@ -120,6 +123,8 @@ public sealed partial class SnapshotEngine
                 siteVersion,
                 progress,
                 cancellationToken).ConfigureAwait(false);
+
+            diagnostics.AddRange(written.Diagnostics);
 
             foreach (var rendered in written.RenderResults)
             {
