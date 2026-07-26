@@ -55,15 +55,18 @@ Processing removes representational waste. It is not an application bundler or c
 
 Default transformations:
 
-- collapse safe HTML whitespace
-- remove ordinary HTML comments
+- collapse safe HTML text-node whitespace through the parsed AngleSharp DOM
+- remove ordinary HTML comments through the DOM
 - preserve conditional, crawler-control, and Snapshot Protocol comments
 - compact valid inline JSON and JSON-LD
-- compact inline `<style>` content with conservative CSS settings
+- compact inline `<style>` content with conservative NUglify CSS settings
+
+The HTML phase does not send the complete page through a second minifier parser. It mutates only ordinary text and comment nodes in the already-parsed DOM, and skips whitespace-sensitive subtrees entirely.
 
 The processor never:
 
 - minifies JavaScript
+- changes content inside `script`, `style`, `pre`, `textarea`, `template`, `code`, SVG, MathML, or legacy preformatted elements during HTML whitespace processing
 - renames variables, properties, selectors, keyframes, or custom properties
 - combines or splits files
 - rewrites filenames or asset references
@@ -79,12 +82,12 @@ HTML verification compares:
 - element order and attributes
 - complete inline script contents
 - complete inline style contents after the explicit CSS phase
-- whitespace-sensitive `pre` and `textarea` content
+- whitespace-sensitive content, including `pre`, `textarea`, `template`, `code`, SVG, and MathML
 - normalized visible body text
 
-If the processor cannot prove that the transformed document preserves these invariants, it keeps the valid pre-minified snapshot and emits a warning.
+If the processor cannot prove that the transformed document preserves these invariants, it keeps the valid pre-minified HTML form and emits a warning identifying which protected category changed.
 
-CSS blocks are parsed/minified and then parsed again. A block that reports an error is preserved unchanged while the rest of the snapshot can continue processing.
+CSS blocks are parsed/minified and then parsed again. A block that reports an error is preserved unchanged while the rest of the snapshot continues processing. This fallback is informational rather than a build failure, and the diagnostic includes the parser detail returned by NUglify.
 
 ## CLI configuration
 
