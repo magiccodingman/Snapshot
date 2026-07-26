@@ -107,16 +107,17 @@ public sealed class SnapshotEndToEndTests
         }
 
         var repositoryRoot = FindRepositoryRoot();
-        var root = Path.Combine(Path.GetTempPath(), "snapshot-loader-root", Guid.NewGuid().ToString("N"));
-        var output = Path.Combine(root, "site.zip");
-        Directory.CreateDirectory(root);
+        var testRoot = Path.Combine(Path.GetTempPath(), "snapshot-loader-root", Guid.NewGuid().ToString("N"));
+        var sourceDirectory = Path.Combine(testRoot, "site");
+        var output = Path.Combine(testRoot, "site.zip");
+        Directory.CreateDirectory(sourceDirectory);
 
         try
         {
             File.Copy(
                 Path.Combine(repositoryRoot, "client", "src", "snapshot-protocol.js"),
-                Path.Combine(root, "snapshot-protocol.js"));
-            await File.WriteAllTextAsync(Path.Combine(root, "index.html"), """
+                Path.Combine(sourceDirectory, "snapshot-protocol.js"));
+            await File.WriteAllTextAsync(Path.Combine(sourceDirectory, "index.html"), """
                 <!doctype html>
                 <html>
                 <head>
@@ -144,7 +145,7 @@ public sealed class SnapshotEndToEndTests
             var engine = SnapshotEngine.CreateBuilder().UsePlaywright().Build();
             var result = await engine.BuildAsync(new SnapshotBuildRequest
             {
-                SourceDirectory = root,
+                SourceDirectory = sourceDirectory,
                 OutputPath = output,
                 Discovery = new SnapshotRouteDiscoveryOptions
                 {
@@ -166,9 +167,9 @@ public sealed class SnapshotEndToEndTests
         }
         finally
         {
-            if (Directory.Exists(root))
+            if (Directory.Exists(testRoot))
             {
-                Directory.Delete(root, recursive: true);
+                Directory.Delete(testRoot, recursive: true);
             }
         }
     }
