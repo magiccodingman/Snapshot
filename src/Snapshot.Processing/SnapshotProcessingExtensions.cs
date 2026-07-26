@@ -11,7 +11,7 @@ public static class SnapshotProcessingExtensions
         ArgumentNullException.ThrowIfNull(builder);
         var options = new SnapshotProcessingOptions();
         configure?.Invoke(options);
-        return builder.UseProcessor(new StandardSnapshotProcessor(options));
+        return builder.UseProcessor(SnapshotProcessorFactory.Create(options));
     }
 
     public static SnapshotEngineBuilder UseStandardProcessing(
@@ -20,6 +20,6 @@ public static class SnapshotProcessingExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(options);
-        return builder.UseProcessor(new StandardSnapshotProcessor(options));
+        return builder.UseProcessor(SnapshotProcessorFactory.Create(options));
     }
 }
