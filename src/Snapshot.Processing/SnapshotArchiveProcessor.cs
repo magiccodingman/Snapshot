@@ -26,11 +26,11 @@ public sealed record SnapshotArchiveProcessingResult(
 public sealed class SnapshotArchiveProcessor
 {
     private const int StreamBufferSize = 1024 * 128;
-    private readonly StandardSnapshotProcessor _processor;
+    private readonly ISnapshotProcessor _processor;
 
     public SnapshotArchiveProcessor(SnapshotProcessingOptions? options = null)
     {
-        _processor = new StandardSnapshotProcessor(options);
+        _processor = SnapshotProcessorFactory.Create(options);
     }
 
     public async Task<SnapshotArchiveProcessingResult> ProcessAsync(
