@@ -14,6 +14,8 @@ The archive root is the deployment root:
 
 ```text
 index.html
+index/
+  index.html
 snapshot-manifest.json
 sitemap.xml
 _framework/
@@ -25,9 +27,11 @@ products/
 
 There is no enclosing folder inside the ZIP. You can upload it directly where supported, extract it into a web root, stream the ZIP as one object, or stream its entries one-by-one into systems such as IPFS.
 
+The root route is the one special case: the original `/index.html` SPA/WASM loader is always preserved, while the rendered `/` snapshot is stored at `/index/index.html`. Root gateway generation is enabled by default and can be disabled with `--no-root-gateway`; disabling it never permits the loader to be overwritten.
+
 ## Quick start
 
-Add the browser client to your application loader:
+Add the browser client to your application loader. Sites that deliberately want crawlers to discover the optional root gateway may also include the link shown below; Snapshot does not inject it automatically.
 
 ```html
 <a href="/index/index.html" hidden aria-hidden="true" tabindex="-1">Snapshot root</a>
@@ -180,6 +184,7 @@ IPFS subdomain gateways and DNSLink provide a proper application origin. Legacy 
 ## Documentation
 
 - [Protocol and message contract](docs/protocol.md)
+- [Root gateway](docs/root-gateway.md)
 - [Browser client](docs/client-script.md)
 - [.NET API](docs/dotnet-api.md)
 - [Playwright executor](docs/playwright.md)
