@@ -43,6 +43,11 @@ public sealed class SnapshotArchiveProcessor
 
         var sourceFullPath = Path.GetFullPath(sourcePath);
         var outputFullPath = Path.GetFullPath(outputPath);
+        if (sourceFullPath.Equals(outputFullPath, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Source and output archive paths must be different. Use a temporary destination and replace the source only after validation.", nameof(outputPath));
+        }
+
         var temporaryPath = outputFullPath + ".processing.partial";
         Directory.CreateDirectory(Path.GetDirectoryName(outputFullPath) ?? Directory.GetCurrentDirectory());
         if (File.Exists(temporaryPath))
@@ -57,11 +62,9 @@ public sealed class SnapshotArchiveProcessor
 
         try
         {
-            SnapshotManifest rewrittenManifest;
             await using (var source = await SnapshotArchive.OpenAsync(sourceFullPath, cancellationToken).ConfigureAwait(false))
             {
-                var sourceValidation = await source.ValidateIntegrityAsync(cancellationToken).ConfigureAwait(false);
-                diagnostics.AddRange(sourceValidation);
+                diagnostics.AddRange(await source.ValidateIntegrityAsync(cancellationToken).ConfigureAwait(false));
                 if (HasErrors(diagnostics))
                 {
                     return Failed(diagnostics, processedSnapshots, originalSnapshotBytes, processedSnapshotBytes);
@@ -91,6 +94,7 @@ public sealed class SnapshotArchiveProcessor
 
                 await foreach (var archiveFile in source.EnumerateFilesAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (archiveFile.Path.Equals(SnapshotProtocolConstants.ManifestFileName, StringComparison.Ordinal))
                     {
                         continue;
@@ -109,7 +113,12 @@ public sealed class SnapshotArchiveProcessor
                     if (manifestEntry.Kind == SnapshotManifestEntryKind.Snapshot && manifestEntry.Route is not null)
                     {
                         await using var input = await source.OpenFileAsync(archiveFile.Path, cancellationToken).ConfigureAwait(false);
-                        using var reader = new StreamReader(input, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, StreamBufferSize, leaveOpen: false);
+                        using var reader = new StreamReader(
+                            input,
+                            Encoding.UTF8,
+                            detectEncodingFromByteOrderMarks: true,
+                            bufferSize: StreamBufferSize,
+                            leaveOpen: false);
                         var html = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
                         var route = SnapshotRoute.Parse(manifestEntry.Route);
                         var processed = await _processor.ProcessAsync(
@@ -132,7 +141,7 @@ public sealed class SnapshotArchiveProcessor
                     rewrittenEntries.Add(manifestEntry);
                 }
 
-                rewrittenManifest = new SnapshotManifest
+                var rewrittenManifest = new SnapshotManifest
                 {
                     FormatVersion = manifest.FormatVersion,
                     ProtocolVersion = manifest.ProtocolVersion,
@@ -177,7 +186,16 @@ public sealed class SnapshotArchiveProcessor
                 originalSnapshotBytes,
                 processedSnapshotBytes);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (OperationCanceledException)
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+
+            throw;
+        }
+        catch (Exception exception)
         {
             if (File.Exists(temporaryPath))
             {
@@ -231,6 +249,7 @@ public sealed class SnapshotArchiveProcessor
             var maximumChars = Math.Max(2, buffer.Length / 4);
             while (offset < text.Length)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var charCount = Math.Min(maximumChars, text.Length - offset);
                 if (offset + charCount < text.Length &&
                     char.IsHighSurrogate(text[offset + charCount - 1]) &&
@@ -239,7 +258,7 @@ public sealed class SnapshotArchiveProcessor
                     charCount = charCount == 1 ? 2 : charCount - 1;
                 }
 
-                var bytesWritten = Encoding.UTF8.GetBytes(text.AsSpan(offset, charCount), buffer);
+                var bytesWritten = Encoding.UTF8.GetBytes(text.AsSpan(offset, charCount), buffer.AsSpan());
                 hash.AppendData(buffer, 0, bytesWritten);
                 await output.WriteAsync(buffer.AsMemory(0, bytesWritten), cancellationToken).ConfigureAwait(false);
                 offset += charCount;
