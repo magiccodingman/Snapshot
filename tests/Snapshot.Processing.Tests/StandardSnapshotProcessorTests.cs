@@ -85,7 +85,7 @@ public sealed class StandardSnapshotProcessorTests
     }
 
     [Fact]
-    public async Task No_minify_style_options_preserve_formatting_but_keep_validation()
+    public async Task Validation_only_processing_preserves_the_exact_html_string()
     {
         var options = new SnapshotProcessingOptions
         {
@@ -95,13 +95,14 @@ public sealed class StandardSnapshotProcessorTests
             MinifyInlineCss = false
         };
         var route = SnapshotRoute.Parse("/docs");
-        var html = "<!doctype html><html><head><!-- keep --><title>Docs</title><link rel=\"canonical\" href=\"https://example.test/docs\"><script type=\"application/json\">{ \"value\": 1 }</script></head><body>Docs</body></html>";
+        var html = "<!doctype html>\n<html><head><!-- keep --><title>Docs</title><link rel=\"canonical\" href=\"https://example.test/docs\"><script type=\"application/json\">{ \"value\": 1 }</script></head><body>Docs</body></html>";
 
-        var result = await new StandardSnapshotProcessor(options).ProcessAsync(new SnapshotProcessingContext(route, html));
+        var processor = SnapshotProcessorFactory.Create(options);
+        var result = await processor.ProcessAsync(new SnapshotProcessingContext(route, html));
 
         Assert.DoesNotContain(result.Diagnostics, diagnostic => diagnostic.Severity == SnapshotDiagnosticSeverity.Error);
-        Assert.Contains("<!-- keep -->", result.Html, StringComparison.Ordinal);
-        Assert.Contains("{ \"value\": 1 }", result.Html, StringComparison.Ordinal);
+        Assert.Equal(html, result.Html);
+        Assert.Equal(result.OriginalUtf8Length, result.ProcessedUtf8Length);
     }
 
     [Fact]
