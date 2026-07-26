@@ -19,11 +19,6 @@ public sealed record SnapshotZipWriteResult(
 
 public sealed class SnapshotZipWriter
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        WriteIndented = true
-    };
-
     private readonly ISnapshotLogger _logger;
 
     public SnapshotZipWriter(ISnapshotLogger logger)
@@ -219,7 +214,7 @@ public sealed class SnapshotZipWriter
             Entries = manifestEntries.OrderBy(static entry => entry.Path, StringComparer.Ordinal).ToArray()
         };
 
-        var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
+        var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, SnapshotManifestJson.Options);
         await WriteBytesEntryAsync(archive, SnapshotProtocolConstants.ManifestFileName, manifestBytes, cancellationToken).ConfigureAwait(false);
         progress?.Report(new SnapshotProgress(SnapshotProgressStage.WritingArchive, $"Wrote {SnapshotProtocolConstants.ManifestFileName}", ++completed, total));
 

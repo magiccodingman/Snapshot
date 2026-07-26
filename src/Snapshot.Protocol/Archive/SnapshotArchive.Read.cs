@@ -60,6 +60,9 @@ public sealed partial class SnapshotArchive
         }
 
         await using var stream = await OpenFileAsync("snapshot-manifest.json", cancellationToken).ConfigureAwait(false);
-        return await JsonSerializer.DeserializeAsync<SnapshotManifest>(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+        return await JsonSerializer.DeserializeAsync<SnapshotManifest>(
+            stream,
+            SnapshotManifestJson.Options,
+            cancellationToken).ConfigureAwait(false);
     }
 }
