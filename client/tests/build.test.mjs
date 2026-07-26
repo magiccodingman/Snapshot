@@ -29,3 +29,17 @@ test("executor announces readiness before waiting for route content", async () =
   assert.notEqual(clientReadyMessage, -1);
   assert.ok(readyAssignment < clientReadyMessage);
 });
+
+test("executor compares the first route without its activation query", async () => {
+  const source = await readFile(sourcePath, "utf8");
+  assert.match(source, /currentExecutorRoutePath\(\)/u);
+  assert.match(source, /searchParams\.delete\(ACTIVATION_QUERY_KEY\)/u);
+});
+
+test("snapshots embed and restore their canonical application route", async () => {
+  const source = await readFile(sourcePath, "utf8");
+  assert.match(source, /data-snapshot-route/u);
+  assert.match(source, /snapshot:route/u);
+  assert.match(source, /restoreEmbeddedSnapshotRoute/u);
+  assert.match(source, /normalizePreservedRoute/u);
+});
