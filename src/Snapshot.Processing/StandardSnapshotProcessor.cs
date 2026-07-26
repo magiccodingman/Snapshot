@@ -4,7 +4,6 @@ using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using NUglify;
 using NUglify.Css;
-using NUglify.Html;
 using Snapshot.Protocol.Diagnostics;
 using Snapshot.Protocol.Processing;
 using Snapshot.Protocol.Routes;
@@ -15,6 +14,24 @@ namespace Snapshot.Processing;
 public sealed class StandardSnapshotProcessor : ISnapshotProcessor
 {
     private static readonly JsonSerializerOptions CompactJsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly Regex PreservedCommentRegex = new(
+        @"^\s*(?:\[if\b|googleoff\b|googleon\b|noindex\b|/noindex\b|Snapshot Protocol\b|End Snapshot Protocol\b)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly HashSet<string> WhitespaceSensitiveElements = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "script",
+        "style",
+        "pre",
+        "textarea",
+        "template",
+        "code",
+        "svg",
+        "math",
+        "xmp",
+        "plaintext",
+        "listing"
+    };
+
     private readonly SnapshotProcessingOptions _options;
     private readonly AngleHtmlParser _parser = new();
 
@@ -57,7 +74,7 @@ public sealed class StandardSnapshotProcessor : ISnapshotProcessor
 
         cancellationToken.ThrowIfCancellationRequested();
         var preparedHtml = SerializeDocument(document);
-        var processedHtml = ProcessHtml(preparedHtml, context, diagnostics);
+        var processedHtml = ProcessHtml(document, preparedHtml, context, diagnostics, cancellationToken);
         var processedLength = Encoding.UTF8.GetByteCount(processedHtml);
 
         return ValueTask.FromResult(new SnapshotProcessingResult(
@@ -239,26 +256,22 @@ public sealed class StandardSnapshotProcessor : ISnapshotProcessor
             var result = Uglify.Css(source, $"{context.Route.Path}#style-{index}", CreateSafeCssSettings());
             if (result.HasErrors || string.IsNullOrEmpty(result.Code))
             {
-                diagnostics.Add(new SnapshotDiagnostic(
-                    SnapshotDiagnosticCodes.InlineCssPreserved,
-                    SnapshotDiagnosticSeverity.Warning,
-                    $"Inline CSS block {index} could not be safely minified and was preserved unchanged.",
-                    context.Route.Path,
-                    context.Route.Source,
-                    context.Route.OutputPath.Value));
+                diagnostics.Add(CreateCssPreservedDiagnostic(
+                    context,
+                    index,
+                    "NUglify rejected the original CSS",
+                    result.Errors.Select(static error => error.ToString())));
                 continue;
             }
 
             var verification = Uglify.Css(result.Code, $"{context.Route.Path}#style-{index}-verification", CreateSafeCssSettings());
             if (verification.HasErrors)
             {
-                diagnostics.Add(new SnapshotDiagnostic(
-                    SnapshotDiagnosticCodes.InlineCssPreserved,
-                    SnapshotDiagnosticSeverity.Warning,
-                    $"Inline CSS block {index} failed post-minification syntax validation and was preserved unchanged.",
-                    context.Route.Path,
-                    context.Route.Source,
-                    context.Route.OutputPath.Value));
+                diagnostics.Add(CreateCssPreservedDiagnostic(
+                    context,
+                    index,
+                    "the minified CSS failed NUglify's verification pass",
+                    verification.Errors.Select(static error => error.ToString())));
                 continue;
             }
 
@@ -267,73 +280,95 @@ public sealed class StandardSnapshotProcessor : ISnapshotProcessor
     }
 
     private string ProcessHtml(
+        IDocument document,
         string preparedHtml,
         SnapshotProcessingContext context,
-        ICollection<SnapshotDiagnostic> diagnostics)
+        ICollection<SnapshotDiagnostic> diagnostics,
+        CancellationToken cancellationToken)
     {
         if (!_options.MinifyHtml && !_options.RemoveHtmlComments)
         {
             return preparedHtml;
         }
 
-        var baselineFingerprint = CreateFingerprint(_parser.ParseDocument(preparedHtml));
-        var result = Uglify.Html(preparedHtml, CreateSafeHtmlSettings());
-        if (result.HasErrors || string.IsNullOrEmpty(result.Code))
+        var baselineFingerprint = CreateFingerprint(document);
+        MinifyHtmlNode(document, preserveWhitespace: false, cancellationToken);
+        var minifiedHtml = SerializeDocument(document);
+        var verificationFingerprint = CreateFingerprint(_parser.ParseDocument(minifiedHtml));
+        var difference = baselineFingerprint.DescribeDifference(verificationFingerprint);
+
+        if (difference is not null)
         {
             diagnostics.Add(new SnapshotDiagnostic(
                 SnapshotDiagnosticCodes.HtmlMinificationPreserved,
                 SnapshotDiagnosticSeverity.Warning,
-                "HTML minification reported a parsing error; the unminified snapshot was preserved.",
+                $"Safe HTML minification changed protected document semantics ({difference}); the unminified HTML form was preserved.",
                 context.Route.Path,
                 context.Route.Source,
-                context.Route.OutputPath.Value));
+                context.Route.OutputPath.Value,
+                "This is a Snapshot safety fallback, not a browser-rendering failure."));
             return preparedHtml;
         }
 
-        var verificationFingerprint = CreateFingerprint(_parser.ParseDocument(result.Code));
-        if (!baselineFingerprint.IsEquivalentTo(verificationFingerprint))
-        {
-            diagnostics.Add(new SnapshotDiagnostic(
-                SnapshotDiagnosticCodes.HtmlMinificationPreserved,
-                SnapshotDiagnosticSeverity.Warning,
-                "HTML minification changed the document structure or executable content; the unminified snapshot was preserved.",
-                context.Route.Path,
-                context.Route.Source,
-                context.Route.OutputPath.Value));
-            return preparedHtml;
-        }
-
-        return result.Code;
+        return minifiedHtml;
     }
 
-    private HtmlSettings CreateSafeHtmlSettings()
+    private void MinifyHtmlNode(
+        INode node,
+        bool preserveWhitespace,
+        CancellationToken cancellationToken)
     {
-        var settings = new HtmlSettings
+        foreach (var child in node.ChildNodes.ToArray())
         {
-            CollapseWhitespaces = _options.MinifyHtml,
-            KeepOneSpaceWhenCollapsing = true,
-            RemoveComments = _options.RemoveHtmlComments,
-            RemoveOptionalTags = false,
-            RemoveInvalidClosingTags = false,
-            RemoveEmptyAttributes = false,
-            RemoveAttributeQuotes = false,
-            DecodeEntityCharacters = false,
-            RemoveScriptStyleTypeAttribute = false,
-            ShortBooleanAttribute = false,
-            MinifyJs = false,
-            MinifyJsAttributes = false,
-            MinifyCss = false,
-            MinifyCssAttributes = false,
-            RemoveJavaScript = false,
-            PrettyPrint = false
-        };
+            cancellationToken.ThrowIfCancellationRequested();
 
-        settings.TagsWithNonCollapsibleWhitespaces["script"] = true;
-        settings.TagsWithNonCollapsibleWhitespaces["style"] = true;
-        settings.KeepCommentsRegex.Add(new Regex(@"^\s*\[if\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant));
-        settings.KeepCommentsRegex.Add(new Regex(@"^\s*(?:googleoff|googleon|noindex|/noindex)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant));
-        settings.KeepCommentsRegex.Add(new Regex(@"^\s*(?:Snapshot Protocol|End Snapshot Protocol)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant));
-        return settings;
+            if (child is IComment comment)
+            {
+                if (_options.RemoveHtmlComments && !PreservedCommentRegex.IsMatch(comment.Data))
+                {
+                    node.RemoveChild(comment);
+                }
+
+                continue;
+            }
+
+            var childPreservesWhitespace = preserveWhitespace ||
+                                           child is IElement element &&
+                                           WhitespaceSensitiveElements.Contains(element.LocalName);
+
+            if (child is IText text && _options.MinifyHtml && !childPreservesWhitespace)
+            {
+                text.Data = CollapseWhitespace(text.Data);
+            }
+
+            MinifyHtmlNode(child, childPreservesWhitespace, cancellationToken);
+        }
+    }
+
+    private static SnapshotDiagnostic CreateCssPreservedDiagnostic(
+        SnapshotProcessingContext context,
+        int index,
+        string reason,
+        IEnumerable<string?> errors)
+    {
+        var details = errors
+            .Where(static error => !string.IsNullOrWhiteSpace(error))
+            .Select(static error => error!.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .Take(3)
+            .ToArray();
+        var parserDetail = details.Length == 0
+            ? "No parser detail was returned."
+            : string.Join(" | ", details);
+
+        return new SnapshotDiagnostic(
+            SnapshotDiagnosticCodes.InlineCssPreserved,
+            SnapshotDiagnosticSeverity.Info,
+            $"Inline CSS block {index} was preserved unchanged because {reason}. {parserDetail}",
+            context.Route.Path,
+            context.Route.Source,
+            context.Route.OutputPath.Value,
+            "This is a safe minification fallback and does not fail the build.");
     }
 
     private static CssSettings CreateSafeCssSettings() => new()
@@ -364,22 +399,38 @@ public sealed class StandardSnapshotProcessor : ISnapshotProcessor
         return $"<!doctype {doctype}>\n{root.OuterHtml}";
     }
 
-    private static SemanticFingerprint CreateFingerprint(IDocument document)
+    private static string CollapseWhitespace(string value)
     {
-        var elements = document.QuerySelectorAll("*")
-            .Select(element =>
+        if (value.Length == 0)
+        {
+            return value;
+        }
+
+        var builder = new StringBuilder(value.Length);
+        var pendingSpace = false;
+        foreach (var character in value)
+        {
+            if (char.IsWhiteSpace(character))
             {
-                var attributes = element.Attributes
-                    .OrderBy(static attribute => attribute.Name, StringComparer.Ordinal)
-                    .Select(static attribute => $"{attribute.Name}={attribute.Value}");
-                return $"{element.TagName}|{string.Join("\u001f", attributes)}";
-            })
-            .ToArray();
-        var scripts = document.QuerySelectorAll("script").Select(static element => element.TextContent).ToArray();
-        var styles = document.QuerySelectorAll("style").Select(static element => element.TextContent).ToArray();
-        var sensitiveText = document.QuerySelectorAll("pre,textarea").Select(static element => element.TextContent).ToArray();
-        var visibleText = NormalizeWhitespace(document.Body?.TextContent ?? string.Empty);
-        return new SemanticFingerprint(elements, scripts, styles, sensitiveText, visibleText);
+                pendingSpace = true;
+                continue;
+            }
+
+            if (pendingSpace)
+            {
+                builder.Append(' ');
+                pendingSpace = false;
+            }
+
+            builder.Append(character);
+        }
+
+        if (pendingSpace)
+        {
+            builder.Append(' ');
+        }
+
+        return builder.ToString();
     }
 
     private static string NormalizeWhitespace(string value)
@@ -411,6 +462,26 @@ public sealed class StandardSnapshotProcessor : ISnapshotProcessor
         return builder.ToString();
     }
 
+    private static SemanticFingerprint CreateFingerprint(IDocument document)
+    {
+        var elements = document.QuerySelectorAll("*")
+            .Select(element =>
+            {
+                var attributes = element.Attributes
+                    .OrderBy(static attribute => attribute.Name, StringComparer.Ordinal)
+                    .Select(static attribute => $"{attribute.Name}={attribute.Value}");
+                return $"{element.TagName}|{string.Join("\u001f", attributes)}";
+            })
+            .ToArray();
+        var scripts = document.QuerySelectorAll("script").Select(static element => element.TextContent).ToArray();
+        var styles = document.QuerySelectorAll("style").Select(static element => element.TextContent).ToArray();
+        var sensitiveText = document.QuerySelectorAll("pre,textarea,template,code,svg,math,xmp,plaintext,listing")
+            .Select(static element => element.TextContent)
+            .ToArray();
+        var visibleText = NormalizeWhitespace(document.Body?.TextContent ?? string.Empty);
+        return new SemanticFingerprint(elements, scripts, styles, sensitiveText, visibleText);
+    }
+
     private sealed record SemanticFingerprint(
         IReadOnlyList<string> Elements,
         IReadOnlyList<string> Scripts,
@@ -418,11 +489,34 @@ public sealed class StandardSnapshotProcessor : ISnapshotProcessor
         IReadOnlyList<string> SensitiveText,
         string VisibleText)
     {
-        public bool IsEquivalentTo(SemanticFingerprint other) =>
-            Elements.SequenceEqual(other.Elements, StringComparer.Ordinal) &&
-            Scripts.SequenceEqual(other.Scripts, StringComparer.Ordinal) &&
-            Styles.SequenceEqual(other.Styles, StringComparer.Ordinal) &&
-            SensitiveText.SequenceEqual(other.SensitiveText, StringComparer.Ordinal) &&
-            VisibleText.Equals(other.VisibleText, StringComparison.Ordinal);
+        public string? DescribeDifference(SemanticFingerprint other)
+        {
+            if (!Elements.SequenceEqual(other.Elements, StringComparer.Ordinal))
+            {
+                return "element or attribute structure";
+            }
+
+            if (!Scripts.SequenceEqual(other.Scripts, StringComparer.Ordinal))
+            {
+                return "inline script content";
+            }
+
+            if (!Styles.SequenceEqual(other.Styles, StringComparer.Ordinal))
+            {
+                return "inline style content";
+            }
+
+            if (!SensitiveText.SequenceEqual(other.SensitiveText, StringComparer.Ordinal))
+            {
+                return "whitespace-sensitive content";
+            }
+
+            if (!VisibleText.Equals(other.VisibleText, StringComparison.Ordinal))
+            {
+                return "visible text";
+            }
+
+            return null;
+        }
     }
 }
