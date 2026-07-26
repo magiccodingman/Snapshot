@@ -63,12 +63,22 @@ public sealed partial class SnapshotEngine
             progress?.Report(new SnapshotProgress(SnapshotProgressStage.DiscoveringRoutes, "Scanning sitemap XML and explicit routes."));
             var discoverer = new SitemapRouteDiscoverer();
             var discovery = await discoverer.DiscoverAsync(sourceDirectory, request.Discovery, cancellationToken).ConfigureAwait(false);
+            var canonicalRoutes = request.RootGateway.Enabled
+                ? discovery.Routes
+                : discovery.Routes.Where(static route => route.Path != "/").ToArray();
+
+            if (!request.RootGateway.Enabled && canonicalRoutes.Count != discovery.Routes.Count)
+            {
+                _logger.Log(new SnapshotLogEntry(
+                    SnapshotLogLevel.Information,
+                    "Root gateway generation is disabled; the source index.html loader will remain without a generated index/index.html snapshot."));
+            }
 
             progress?.Report(new SnapshotProgress(SnapshotProgressStage.Planning, "Planning canonical snapshots, gateways, aliases, and provider artifacts."));
             var planner = new SnapshotOutputPlanner();
             var plan = planner.Create(
                 sourceDirectory,
-                discovery.Routes,
+                canonicalRoutes,
                 request.TargetFilesystem,
                 request.CaseAliases,
                 discovery.Diagnostics);
