@@ -6,8 +6,8 @@
     <RootNamespace>Snapshot.Cli</RootNamespace>
     <PackageId>Snapshot.Cli</PackageId>
     <PackageVersion>$(SnapshotPackageVersion)</PackageVersion>
-    <Description>Cross-platform command-line tool for building, inspecting, extracting, and validating Snapshot Protocol ZIP artifacts.</Description>
-    <PackageTags>snapshot;cli;playwright;spa;wasm;seo;zip</PackageTags>
+    <Description>Cross-platform command-line tool for building, inspecting, extracting, validating, and safely processing Snapshot Protocol ZIP artifacts.</Description>
+    <PackageTags>snapshot;cli;playwright;spa;wasm;seo;zip;minify</PackageTags>
     <IsPackable>true</IsPackable>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>snapshot</ToolCommandName>
@@ -15,6 +15,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Snapshot.Protocol/Snapshot.Protocol.csproj" />
+    <ProjectReference Include="../Snapshot.Processing/Snapshot.Processing.csproj" />
     <ProjectReference Include="../Snapshot.Playwright/Snapshot.Playwright.csproj"
                       AdditionalProperties="PlaywrightPlatform=none;SnapshotExcludePlaywrightLauncher=true" />
   </ItemGroup>
