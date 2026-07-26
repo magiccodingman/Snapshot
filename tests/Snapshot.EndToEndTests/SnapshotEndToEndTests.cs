@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Snapshot.Playwright;
+using Snapshot.Protocol.Archive;
 using Snapshot.Protocol.Build;
 using Snapshot.Protocol.Hosting;
 using Snapshot.Protocol.Routes;
@@ -93,6 +94,81 @@ public sealed class SnapshotEndToEndTests
             if (Directory.Exists(outputRoot))
             {
                 Directory.Delete(outputRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Loader_only_root_can_navigate_to_a_ready_route()
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("SNAPSHOT_E2E"), "1", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var repositoryRoot = FindRepositoryRoot();
+        var root = Path.Combine(Path.GetTempPath(), "snapshot-loader-root", Guid.NewGuid().ToString("N"));
+        var output = Path.Combine(root, "site.zip");
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            File.Copy(
+                Path.Combine(repositoryRoot, "client", "src", "snapshot-protocol.js"),
+                Path.Combine(root, "snapshot-protocol.js"));
+            await File.WriteAllTextAsync(Path.Combine(root, "index.html"), """
+                <!doctype html>
+                <html>
+                <head>
+                  <meta charset="utf-8">
+                  <base href="/">
+                  <script id="snapshot-protocol" data-site-version="1" src="/snapshot-protocol.js"></script>
+                </head>
+                <body>
+                  <div id="app">Loader only; the root intentionally has no snapshot-ready element.</div>
+                  <script>
+                    window.addEventListener("popstate", () => {
+                      if (location.pathname !== "/target") return;
+                      document.getElementById("app").innerHTML = `
+                        <main data-test-page-id="loader-target">Target content</main>
+                        <snapshot-ready>
+                          <title>Loader Target</title>
+                          <link rel="canonical" href="https://example.test/target">
+                        </snapshot-ready>`;
+                    });
+                  </script>
+                </body>
+                </html>
+                """);
+
+            var engine = SnapshotEngine.CreateBuilder().UsePlaywright().Build();
+            var result = await engine.BuildAsync(new SnapshotBuildRequest
+            {
+                SourceDirectory = root,
+                OutputPath = output,
+                Discovery = new SnapshotRouteDiscoveryOptions
+                {
+                    Mode = SnapshotRouteDiscoveryMode.ExplicitOnly,
+                    AdditionalRoutes = ["/target"]
+                },
+                CaseAliases = new SnapshotCaseAliasOptions
+                {
+                    Enabled = false,
+                    GenerateMissingPrefixGateways = false
+                },
+                Concurrency = 1
+            });
+
+            Assert.True(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(diagnostic => $"{diagnostic.Code}: {diagnostic.Message}")));
+            await using var archive = await SnapshotArchive.OpenAsync(output);
+            var html = await archive.ReadTextAsync("target/index.html");
+            Assert.Contains("data-test-page-id=\"loader-target\"", html, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
             }
         }
     }
