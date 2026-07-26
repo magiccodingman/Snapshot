@@ -128,8 +128,46 @@ internal sealed class BrowserWorker : IAsyncDisposable
         _page.RequestFailed += (_, request) => _failedRequests.Enqueue($"{request.Method} {request.Url}: {request.Failure}");
         var activationUri = new Uri(_baseUri, $"?{SnapshotProtocolConstants.ActivationQueryKey}={Uri.EscapeDataString(_sessionToken)}");
         await _page.GotoAsync(activationUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = (float)_timeouts.StartupTimeout.TotalMilliseconds }).ConfigureAwait(false);
-        await _page.WaitForFunctionAsync("() => window.__snapshotProtocolReady === true", null, new PageWaitForFunctionOptions { Timeout = (float)_timeouts.StartupTimeout.TotalMilliseconds }).ConfigureAwait(false);
+
+        var protocolScriptPresent = await _page.EvaluateAsync<bool>("() => document.getElementById('snapshot-protocol') !== null").ConfigureAwait(false);
+        if (!protocolScriptPresent)
+        {
+            var legacyClientPresent = await _page.EvaluateAsync<bool>("""
+                () => Array.from(document.scripts).some(script =>
+                  /truthorigin-snapshot|truthseo-snapshot|truth-snapshot/i.test(`${script.id} ${script.src}`))
+                """).ConfigureAwait(false);
+            var legacyDetail = legacyClientPresent
+                ? " A legacy TruthOrigin/TruthSEO snapshot client was detected, but it is not compatible with the new Snapshot Protocol messages."
+                : string.Empty;
+            throw new InvalidOperationException(
+                "The published application does not contain <script id=\"snapshot-protocol\">." + legacyDetail +
+                " Add the new Snapshot Protocol browser client to index.html and rebuild/publish the application before creating a snapshot.");
+        }
+
+        try
+        {
+            await _page.WaitForFunctionAsync("() => window.__snapshotProtocolReady === true", null, new PageWaitForFunctionOptions { Timeout = (float)_timeouts.StartupTimeout.TotalMilliseconds }).ConfigureAwait(false);
+        }
+        catch (TimeoutException exception)
+        {
+            var details = BuildStartupDetails();
+            throw new InvalidOperationException(
+                $"The Snapshot Protocol browser client was present but did not announce readiness within {_timeouts.StartupTimeout}.{details}",
+                exception);
+        }
         cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    private string BuildStartupDetails()
+    {
+        var console = _consoleErrors.Take(3).ToArray();
+        var requests = _failedRequests.Take(3).ToArray();
+        var parts = new List<string>();
+        if (console.Length > 0) parts.Add($" Browser console errors: {string.Join(" | ", console)}");
+        if (requests.Length > 0) parts.Add($" Failed requests: {string.Join(" | ", requests)}");
+        return parts.Count == 0
+            ? " Check that snapshot-protocol.js loaded successfully and did not throw during startup."
+            : string.Concat(parts);
     }
 
     private void Receive(string payload)

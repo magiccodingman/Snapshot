@@ -19,3 +19,13 @@ test("client does not hard-code the legacy site version", async () => {
   assert.doesNotMatch(source, /data-version[^\n]*["']9["']/u);
   assert.match(source, /data-site-version/u);
 });
+
+test("executor announces readiness before waiting for route content", async () => {
+  const source = await readFile(sourcePath, "utf8");
+  assert.doesNotMatch(source, /startupReadiness\s*=\s*await\s+waitForReadiness/u);
+  const readyAssignment = source.indexOf("window.__snapshotProtocolReady = true");
+  const clientReadyMessage = source.indexOf('type: "snapshot:client-ready"');
+  assert.notEqual(readyAssignment, -1);
+  assert.notEqual(clientReadyMessage, -1);
+  assert.ok(readyAssignment < clientReadyMessage);
+});

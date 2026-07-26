@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -24,7 +25,7 @@ internal sealed class SnapshotLocalHost : IAsyncDisposable
     {
         var options = new WebApplicationOptions { ContentRootPath = sourceDirectory, WebRootPath = sourceDirectory, EnvironmentName = "Production" };
         var builder = WebApplication.CreateSlimBuilder(options);
-        builder.WebHost.ConfigureKestrel(kestrel => kestrel.ListenLocalhost(0));
+        builder.WebHost.ConfigureKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, 0));
         var app = builder.Build();
         app.UseDefaultFiles();
         app.UseStaticFiles(new StaticFileOptions { ServeUnknownFileTypes = true });
@@ -37,7 +38,7 @@ internal sealed class SnapshotLocalHost : IAsyncDisposable
         var server = app.Services.GetRequiredService<IServer>();
         var addresses = server.Features.Get<IServerAddressesFeature>()?.Addresses;
         var address = addresses?.SingleOrDefault() ?? throw new InvalidOperationException("The local snapshot host did not expose a listening address.");
-        var baseUri = new Uri(address.Replace("localhost", "127.0.0.1", StringComparison.OrdinalIgnoreCase));
+        var baseUri = new Uri(address);
         logger.Log(new SnapshotLogEntry(SnapshotLogLevel.Information, $"Serving the static application from {baseUri}."));
         return new SnapshotLocalHost(app, baseUri);
     }

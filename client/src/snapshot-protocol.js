@@ -25,8 +25,8 @@
     validateSnapshotVersion();
   }
 
-  async function activateExecutorMode(token) {
-    let startupReadiness = null;
+  function activateExecutorMode(token) {
+    let startupReadiness = findReadiness();
     let firstRequest = true;
 
     window.addEventListener("message", async (event) => {
@@ -44,10 +44,12 @@
       const timeoutMs = normalizeTimeout(message.timeoutMs);
       try {
         let readiness;
-        const canUseStartupReadiness = firstRequest && startupReadiness?.isConnected === true && targetPath === currentRoutePath();
-        if (canUseStartupReadiness) {
+        const firstRequestTargetsCurrentRoute = firstRequest && targetPath === currentRoutePath();
+        if (firstRequestTargetsCurrentRoute) {
           window.history.replaceState({}, "", targetPath);
-          readiness = startupReadiness;
+          readiness = startupReadiness?.isConnected === true
+            ? startupReadiness
+            : await waitForReadiness(timeoutMs);
         } else {
           markCurrentReadinessConsumed();
           navigate(targetPath);
@@ -84,7 +86,6 @@
       }
     });
 
-    startupReadiness = await waitForReadiness(null);
     window.__snapshotProtocolReady = true;
     postToExecutor({ type: "snapshot:client-ready", sessionToken: token, protocolVersion: PROTOCOL_VERSION, clientVersion: CLIENT_VERSION });
     console.info(`${logPrefix} Executor mode is ready.`);
@@ -101,11 +102,13 @@
     }
   }
 
+  function findReadiness() {
+    return document.querySelector(`${READY_ELEMENT}:not([${PROCESSED_ATTRIBUTE}="true"])`);
+  }
+
   function waitForReadiness(timeoutMs) {
     return new Promise((resolve, reject) => {
       let completed = false;
-      const selector = `${READY_ELEMENT}:not([${PROCESSED_ATTRIBUTE}="true"])`;
-      const find = () => document.querySelector(selector);
       const finish = (value, error) => {
         if (completed) return;
         completed = true;
@@ -114,10 +117,10 @@
         if (timeout !== null) clearTimeout(timeout);
         if (error) reject(error); else resolve(value);
       };
-      const immediate = find();
+      const immediate = findReadiness();
       if (immediate) { resolve(immediate); return; }
-      const observer = new MutationObserver(() => { const element = find(); if (element) finish(element); });
-      const poller = setInterval(() => { const element = find(); if (element) finish(element); }, 100);
+      const observer = new MutationObserver(() => { const element = findReadiness(); if (element) finish(element); });
+      const poller = setInterval(() => { const element = findReadiness(); if (element) finish(element); }, 100);
       const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0
         ? setTimeout(() => {
             const error = new Error(`Timed out waiting for <${READY_ELEMENT}> after ${timeoutMs} ms.`);

@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -43,7 +44,7 @@ public sealed class SnapshotTestHost : IAsyncDisposable
     {
         var archivePath = Path.GetFullPath(options.ArchivePath);
         var builder = WebApplication.CreateSlimBuilder();
-        builder.WebHost.ConfigureKestrel(kestrel => kestrel.ListenLocalhost(0));
+        builder.WebHost.ConfigureKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, 0));
         var app = builder.Build();
 
         app.Run(async context =>
@@ -88,7 +89,7 @@ public sealed class SnapshotTestHost : IAsyncDisposable
         var server = app.Services.GetRequiredService<IServer>();
         var address = server.Features.Get<IServerAddressesFeature>()?.Addresses.Single()
             ?? throw new InvalidOperationException("Test host did not expose an address.");
-        return new SnapshotTestHost(app, new Uri(address.Replace("localhost", "127.0.0.1", StringComparison.OrdinalIgnoreCase)));
+        return new SnapshotTestHost(app, new Uri(address));
     }
 
     public async ValueTask DisposeAsync()
