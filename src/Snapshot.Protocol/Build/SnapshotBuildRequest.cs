@@ -19,6 +19,8 @@ public sealed class SnapshotBuildRequest
 
     public SnapshotRouteDiscoveryOptions Discovery { get; init; } = new();
 
+    public SnapshotRootGatewayOptions RootGateway { get; init; } = new();
+
     public SnapshotCaseAliasOptions CaseAliases { get; init; } = new();
 
     public SnapshotTimeoutOptions Timeouts { get; init; } = new();
@@ -30,6 +32,11 @@ public sealed class SnapshotBuildRequest
     public int? Concurrency { get; init; }
 
     public bool PreservePartialArtifact { get; init; }
+}
+
+public sealed class SnapshotRootGatewayOptions
+{
+    public bool Enabled { get; init; } = true;
 }
 
 public sealed class SnapshotCaseAliasOptions
