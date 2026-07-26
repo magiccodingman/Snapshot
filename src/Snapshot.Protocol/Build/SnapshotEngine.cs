@@ -139,13 +139,18 @@ public sealed partial class SnapshotEngine
 
                 if (!rendered.Succeeded)
                 {
-                    diagnostics.Add(new SnapshotDiagnostic(
-                        rendered.ErrorCode ?? SnapshotDiagnosticCodes.BrowserFailure,
-                        SnapshotDiagnosticSeverity.Error,
-                        rendered.ErrorMessage ?? "The browser renderer did not return a snapshot.",
-                        rendered.Route.Path,
-                        rendered.Route.Source,
-                        rendered.Route.OutputPath.Value));
+                    var code = rendered.ErrorCode ?? SnapshotDiagnosticCodes.BrowserFailure;
+                    var message = rendered.ErrorMessage ?? "The browser renderer did not return a snapshot.";
+                    if (!ContainsDiagnostic(diagnostics, code, rendered.Route.Path, message))
+                    {
+                        diagnostics.Add(new SnapshotDiagnostic(
+                            code,
+                            SnapshotDiagnosticSeverity.Error,
+                            message,
+                            rendered.Route.Path,
+                            rendered.Route.Source,
+                            rendered.Route.OutputPath.Value));
+                    }
                 }
             }
 
@@ -298,6 +303,17 @@ public sealed partial class SnapshotEngine
         var version = SiteVersionRegex().Match(script.Value);
         return version.Success ? version.Groups[2].Value.Trim() : null;
     }
+
+    private static bool ContainsDiagnostic(
+        IEnumerable<SnapshotDiagnostic> diagnostics,
+        string code,
+        string route,
+        string message) =>
+        diagnostics.Any(diagnostic =>
+            diagnostic.Severity == SnapshotDiagnosticSeverity.Error &&
+            diagnostic.Code.Equals(code, StringComparison.Ordinal) &&
+            string.Equals(diagnostic.Route, route, StringComparison.Ordinal) &&
+            diagnostic.Message.Equals(message, StringComparison.Ordinal));
 
     private static bool HasErrors(IEnumerable<SnapshotDiagnostic> diagnostics) =>
         diagnostics.Any(static diagnostic => diagnostic.Severity == SnapshotDiagnosticSeverity.Error);
