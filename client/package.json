@@ -1,0 +1,28 @@
+{
+  "name": "@magiccodingman/snapshot-protocol",
+  "version": "0.1.0",
+  "description": "Browser-side client for Snapshot Protocol readiness, metadata capture, and hydration version recovery.",
+  "license": "AGPL-3.0-only",
+  "author": "Lance Wright",
+  "homepage": "https://github.com/magiccodingman/Snapshot",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magiccodingman/Snapshot.git",
+    "directory": "client"
+  },
+  "bugs": {
+    "url": "https://github.com/magiccodingman/Snapshot/issues"
+  },
+  "keywords": ["snapshot","spa","wasm","seo","prerender","blazor"],
+  "files": ["dist/","README.md","LICENSE","128x128_compressed.png"],
+  "main": "dist/snapshot-protocol.js",
+  "unpkg": "dist/snapshot-protocol.min.js",
+  "jsdelivr": "dist/snapshot-protocol.min.js",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "prepack": "npm run test && npm run build"
+  },
+  "engines": { "node": ">=20" },
+  "publishConfig": { "access": "public" }
+}

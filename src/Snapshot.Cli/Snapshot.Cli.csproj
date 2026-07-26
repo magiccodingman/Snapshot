@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="../../eng/Versions.props" />
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Snapshot.Cli</AssemblyName>
+    <RootNamespace>Snapshot.Cli</RootNamespace>
+    <PackageId>Snapshot.Cli</PackageId>
+    <PackageVersion>$(SnapshotPackageVersion)</PackageVersion>
+    <Description>Cross-platform command-line tool for building, inspecting, extracting, and validating Snapshot Protocol ZIP artifacts.</Description>
+    <PackageTags>snapshot;cli;playwright;spa;wasm;seo;zip</PackageTags>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>snapshot</ToolCommandName>
+    <PlaywrightPlatform>none</PlaywrightPlatform>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Snapshot.Protocol/Snapshot.Protocol.csproj" />
+    <ProjectReference Include="../Snapshot.Playwright/Snapshot.Playwright.csproj"
+                      AdditionalProperties="PlaywrightPlatform=none;SnapshotExcludePlaywrightLauncher=true" />
+  </ItemGroup>
+
+  <Target Name="ExcludeTransitivePlaywrightLauncher"
+          AfterTargets="CopyPlaywrightFilesToOutput">
+    <ItemGroup>
+      <_TransitivePlaywrightLauncher Include="@(Content)"
+                                    Condition="'%(Content.Link)' == 'playwright.ps1' Or '%(Content.Filename)%(Content.Extension)' == 'playwright.ps1'" />
+      <Content Remove="@(_TransitivePlaywrightLauncher)" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="DeleteResidualPlaywrightLauncherFromPublish"
+          AfterTargets="Publish"
+          BeforeTargets="PackTool">
+    <Delete Files="$(PublishDir)playwright.ps1" />
+  </Target>
+</Project>
