@@ -124,6 +124,29 @@ public sealed class StandardSnapshotProcessorTests
     }
 
     [Fact]
+    public async Task Repeated_identical_css_fallback_is_reported_once_per_processor()
+    {
+        const string css = ".broken { color: red;";
+        var options = new SnapshotProcessingOptions
+        {
+            MinifyHtml = false,
+            RemoveHtmlComments = false,
+            MinifyInlineJson = false
+        };
+        var processor = new StandardSnapshotProcessor(options);
+
+        var first = await processor.ProcessAsync(new SnapshotProcessingContext(
+            SnapshotRoute.Parse("/one"),
+            $"<!doctype html><html><head><title>One</title><link rel=\"canonical\" href=\"https://example.test/one\"><style>{css}</style></head><body>One</body></html>"));
+        var second = await processor.ProcessAsync(new SnapshotProcessingContext(
+            SnapshotRoute.Parse("/two"),
+            $"<!doctype html><html><head><title>Two</title><link rel=\"canonical\" href=\"https://example.test/two\"><style>{css}</style></head><body>Two</body></html>"));
+
+        Assert.Single(first.Diagnostics, item => item.Code == SnapshotDiagnosticCodes.InlineCssPreserved);
+        Assert.DoesNotContain(second.Diagnostics, item => item.Code == SnapshotDiagnosticCodes.InlineCssPreserved);
+    }
+
+    [Fact]
     public async Task Canonical_route_mismatch_is_an_error_by_default()
     {
         var route = SnapshotRoute.Parse("/docs");
