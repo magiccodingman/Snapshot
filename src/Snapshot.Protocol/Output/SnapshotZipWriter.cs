@@ -118,9 +118,9 @@ public sealed class SnapshotZipWriter
                 throw new InvalidOperationException($"The renderer returned route {rendered.Route.Path} more than once.");
             }
 
-            renderSummaries.Add(rendered with { Html = null });
             if (!rendered.Succeeded)
             {
+                renderSummaries.Add(rendered with { Html = null });
                 continue;
             }
 
@@ -144,6 +144,21 @@ public sealed class SnapshotZipWriter
                 cancellationToken).ConfigureAwait(false);
             processingDiagnostics.AddRange(processed.Diagnostics);
 
+            var processingError = processed.Diagnostics.FirstOrDefault(static diagnostic =>
+                diagnostic.Severity == SnapshotDiagnosticSeverity.Error);
+            if (processingError is not null)
+            {
+                renderSummaries.Add(rendered with
+                {
+                    Succeeded = false,
+                    Html = null,
+                    ErrorCode = processingError.Code,
+                    ErrorMessage = processingError.Message
+                });
+                continue;
+            }
+
+            renderSummaries.Add(rendered with { Html = null });
             var (length, hash) = await WriteTextEntryAsync(archive, planned.ArchivePath, processed.Html, cancellationToken).ConfigureAwait(false);
             manifestEntries.Add(new SnapshotManifestEntry(
                 planned.ArchivePath,
@@ -256,6 +271,7 @@ public sealed class SnapshotZipWriter
             var maximumChars = Math.Max(2, buffer.Length / 4);
             while (offset < text.Length)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var charCount = Math.Min(maximumChars, text.Length - offset);
                 if (offset + charCount < text.Length &&
                     char.IsHighSurrogate(text[offset + charCount - 1]) &&
@@ -264,7 +280,7 @@ public sealed class SnapshotZipWriter
                     charCount = charCount == 1 ? 2 : charCount - 1;
                 }
 
-                var bytesWritten = Encoding.UTF8.GetBytes(text.AsSpan(offset, charCount), buffer);
+                var bytesWritten = Encoding.UTF8.GetBytes(text.AsSpan(offset, charCount), buffer.AsSpan());
                 hash.AppendData(buffer, 0, bytesWritten);
                 await output.WriteAsync(buffer.AsMemory(0, bytesWritten), cancellationToken).ConfigureAwait(false);
                 offset += charCount;
