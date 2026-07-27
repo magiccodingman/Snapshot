@@ -1,5 +1,6 @@
 using AngleSharp.Html.Parser;
 using Snapshot.Protocol.Diagnostics;
+using Snapshot.Protocol.Metadata;
 using Snapshot.Protocol.Processing;
 using Snapshot.Protocol.Routes;
 using Xunit;
@@ -176,7 +177,7 @@ public sealed class StandardSnapshotProcessorTests
     }
 
     [Fact]
-    public async Task Validation_only_processing_preserves_the_exact_html_string()
+    public async Task Validation_only_processing_preserves_content_and_adds_protocol_metadata()
     {
         var options = new SnapshotProcessingOptions
         {
@@ -192,8 +193,16 @@ public sealed class StandardSnapshotProcessorTests
         var result = await processor.ProcessAsync(new SnapshotProcessingContext(route, html));
 
         Assert.DoesNotContain(result.Diagnostics, diagnostic => diagnostic.Severity == SnapshotDiagnosticSeverity.Error);
-        Assert.Equal(html, result.Html);
-        Assert.Equal(result.OriginalUtf8Length, result.ProcessedUtf8Length);
+        var document = new HtmlParser().ParseDocument(result.Html);
+        Assert.Contains("keep", result.Html, StringComparison.Ordinal);
+        Assert.Equal("{ \"value\": 1 }", document.QuerySelector("script")!.TextContent);
+        Assert.Equal(
+            SnapshotRepresentationMetadata.StaticPrerendered,
+            document.QuerySelector("meta[name=rendering-mode]")?.GetAttribute("content"));
+        Assert.Equal(
+            SnapshotRepresentationMetadata.SnapshotProtocolMetaContent,
+            document.QuerySelector("meta[name=snapshot-protocol]")?.GetAttribute("content"));
+        Assert.True(result.ProcessedUtf8Length > result.OriginalUtf8Length);
     }
 
     [Fact]
