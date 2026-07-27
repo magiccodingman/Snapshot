@@ -9,4 +9,7 @@
     <PackageTags>snapshot;spa;wasm;seo;prerender;zip;static-site</PackageTags>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="AngleSharp" />
+  </ItemGroup>
 </Project>

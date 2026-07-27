@@ -9,6 +9,7 @@ using Snapshot.Protocol.Diagnostics;
 using Snapshot.Protocol.Hosting;
 using Snapshot.Protocol.Hosting.Netlify;
 using Snapshot.Protocol.Manifest;
+using Snapshot.Protocol.Metadata;
 using Snapshot.Protocol.Processing;
 using Snapshot.Protocol.Protocol;
 
@@ -58,6 +59,12 @@ public sealed class SnapshotZipWriter
             .Where(static entry => entry.Kind == SnapshotGeneratedEntryKind.Snapshot && entry.Route is not null)
             .ToDictionary(static entry => entry.Route!, StringComparer.Ordinal);
 
+        var sitemapAnnotations = await SnapshotSitemapAnnotator.CreateAsync(
+            plan.SourceDirectory,
+            plan.CanonicalRoutes,
+            cancellationToken).ConfigureAwait(false);
+        processingDiagnostics.AddRange(sitemapAnnotations.Diagnostics);
+
         await using var file = new FileStream(
             temporaryPath,
             FileMode.CreateNew,
@@ -96,17 +103,56 @@ public sealed class SnapshotZipWriter
                 continue;
             }
 
-            await using var input = new FileStream(sourceFile, FileMode.Open, FileAccess.Read, FileShare.Read, StreamBufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
-            var (length, hash) = await WriteStreamEntryAsync(archive, archivePath, input, cancellationToken).ConfigureAwait(false);
-            var canonicalRoute = canonicalByOutputPath.TryGetValue(archivePath, out var manualRoute)
-                ? manualRoute.Path
-                : null;
+            var isRootLoader = archivePath.Equals("index.html", StringComparison.Ordinal);
+            var isCanonicalSource = canonicalByOutputPath.TryGetValue(archivePath, out var canonicalSourceRoute);
+            (long Length, string Hash) sourceResult;
+            if (sitemapAnnotations.Entries.TryGetValue(archivePath, out var annotatedSitemap))
+            {
+                await using var input = new MemoryStream(annotatedSitemap, writable: false);
+                sourceResult = await WriteStreamEntryAsync(archive, archivePath, input, cancellationToken).ConfigureAwait(false);
+            }
+            else if (archivePath.EndsWith(".html", StringComparison.OrdinalIgnoreCase) &&
+                     (isRootLoader || isCanonicalSource))
+            {
+                var sourceHtml = await File.ReadAllTextAsync(sourceFile, cancellationToken).ConfigureAwait(false);
+                var annotation = SnapshotHtmlMetadataAnnotator.Annotate(sourceHtml);
+                if (annotation.FailureReason is not null)
+                {
+                    var description = isRootLoader
+                        ? "Root index.html"
+                        : $"Canonical source snapshot {canonicalSourceRoute!.Path}";
+                    processingDiagnostics.Add(new SnapshotDiagnostic(
+                        SnapshotDiagnosticCodes.HtmlMetadataPreserved,
+                        SnapshotDiagnosticSeverity.Warning,
+                        $"{description} rendering metadata was not added because {annotation.FailureReason}",
+                        isRootLoader ? "/" : canonicalSourceRoute!.Path,
+                        sourceFile,
+                        archivePath,
+                        "The source HTML was copied unchanged into the artifact."));
+                }
+
+                if (annotation.Changed)
+                {
+                    sourceResult = await WriteTextEntryAsync(archive, archivePath, annotation.Html, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await using var input = new FileStream(sourceFile, FileMode.Open, FileAccess.Read, FileShare.Read, StreamBufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                    sourceResult = await WriteStreamEntryAsync(archive, archivePath, input, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                await using var input = new FileStream(sourceFile, FileMode.Open, FileAccess.Read, FileShare.Read, StreamBufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                sourceResult = await WriteStreamEntryAsync(archive, archivePath, input, cancellationToken).ConfigureAwait(false);
+            }
+
             manifestEntries.Add(new SnapshotManifestEntry(
                 archivePath,
                 SnapshotManifestEntryKind.Source,
-                length,
-                hash,
-                Route: canonicalRoute));
+                sourceResult.Length,
+                sourceResult.Hash,
+                Route: isCanonicalSource ? canonicalSourceRoute!.Path : null));
             progress?.Report(new SnapshotProgress(SnapshotProgressStage.WritingArchive, $"Copied {archivePath}", ++completed, total));
         }
 

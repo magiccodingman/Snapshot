@@ -7,23 +7,30 @@ public static class SnapshotProcessorFactory
     public static ISnapshotProcessor Create(SnapshotProcessingOptions? options = null)
     {
         options ??= new SnapshotProcessingOptions();
+
+        ISnapshotProcessor processor;
         if (!options.Enabled)
         {
-            return PassthroughSnapshotProcessor.Instance;
+            processor = PassthroughSnapshotProcessor.Instance;
         }
-
-        var standardOptions = CloneOptions(options);
-        standardOptions.MinifyInlineCss = false;
-
-        ISnapshotProcessor processor = new StandardSnapshotProcessor(standardOptions);
-        if (options.MinifyInlineCss)
+        else
         {
-            processor = new InlineCssSnapshotProcessor(processor);
+            var standardOptions = CloneOptions(options);
+            standardOptions.MinifyInlineCss = false;
+
+            processor = new StandardSnapshotProcessor(standardOptions);
+            if (options.MinifyInlineCss)
+            {
+                processor = new InlineCssSnapshotProcessor(processor);
+            }
+
+            if (!HasTransformations(options))
+            {
+                processor = new ValidationOnlySnapshotProcessor(processor);
+            }
         }
 
-        return HasTransformations(options)
-            ? processor
-            : new ValidationOnlySnapshotProcessor(processor);
+        return new SnapshotMetadataProcessor(processor);
     }
 
     private static SnapshotProcessingOptions CloneOptions(SnapshotProcessingOptions options) => new()
