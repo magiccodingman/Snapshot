@@ -56,24 +56,37 @@ internal sealed class InlineCssSnapshotProcessor : ISnapshotProcessor
             }
 
             var (source, removedMarkers) = RemoveBlazorRenderMarkers(originalSource);
-            var result = Minify(source, context.Route.Path, index, "");
+            var result = Minify(source, context.Route.Path, index, string.Empty);
             var repairedHeadingSelectors = 0;
+            var appendedClosingBrace = false;
 
-            if (result.HasErrors || string.IsNullOrEmpty(result.Code))
+            if (Failed(result))
             {
                 var repairedSource = RepairSplitHeadingSelectors(source, out repairedHeadingSelectors);
                 if (repairedHeadingSelectors > 0)
                 {
-                    var repairedResult = Minify(repairedSource, context.Route.Path, index, "-repaired");
-                    if (!repairedResult.HasErrors && !string.IsNullOrEmpty(repairedResult.Code))
+                    var repairedResult = Minify(repairedSource, context.Route.Path, index, "-heading-repaired");
+                    if (!Failed(repairedResult))
                     {
                         source = repairedSource;
                         result = repairedResult;
                     }
+                    else if (removedMarkers > 0 &&
+                             HasOnlyUnexpectedEndOfFileErrors(repairedResult) &&
+                             TryAppendSingleMissingClosingBrace(repairedSource, out var completedSource))
+                    {
+                        var completedResult = Minify(completedSource, context.Route.Path, index, "-brace-repaired");
+                        if (!Failed(completedResult))
+                        {
+                            source = completedSource;
+                            result = completedResult;
+                            appendedClosingBrace = true;
+                        }
+                    }
                 }
             }
 
-            if (result.HasErrors || string.IsNullOrEmpty(result.Code))
+            if (Failed(result))
             {
                 if (removedMarkers > 0)
                 {
@@ -97,7 +110,7 @@ internal sealed class InlineCssSnapshotProcessor : ISnapshotProcessor
             var verification = Minify(result.Code, context.Route.Path, index, "-verification");
             if (verification.HasErrors)
             {
-                if (removedMarkers > 0 || repairedHeadingSelectors > 0)
+                if (removedMarkers > 0 || repairedHeadingSelectors > 0 || appendedClosingBrace)
                 {
                     style.TextContent = source;
                     changed = true;
@@ -146,6 +159,19 @@ internal sealed class InlineCssSnapshotProcessor : ISnapshotProcessor
     private static UglifyResult Minify(string source, string route, int index, string suffix) =>
         Uglify.Css(source, $"{route}#style-{index}{suffix}", CreateSafeCssSettings());
 
+    private static bool Failed(UglifyResult result) => result.HasErrors || string.IsNullOrEmpty(result.Code);
+
+    private static bool HasOnlyUnexpectedEndOfFileErrors(UglifyResult result)
+    {
+        var errors = result.Errors
+            .Select(static error => error.ToString())
+            .Where(static error => !string.IsNullOrWhiteSpace(error))
+            .ToArray();
+
+        return errors.Length > 0 && errors.All(static error =>
+            error.Contains("Unexpected end of file", StringComparison.OrdinalIgnoreCase));
+    }
+
     private bool ShouldReportFallback(string source, string stage)
     {
         var bytes = Encoding.UTF8.GetBytes(source);
@@ -178,6 +204,97 @@ internal sealed class InlineCssSnapshotProcessor : ISnapshotProcessor
         });
         repairedSelectors = count;
         return repaired;
+    }
+
+    private static bool TryAppendSingleMissingClosingBrace(string source, out string completedSource)
+    {
+        var depth = 0;
+        var inComment = false;
+        var quote = '\0';
+        var escaped = false;
+
+        for (var index = 0; index < source.Length; index++)
+        {
+            var character = source[index];
+            var next = index + 1 < source.Length ? source[index + 1] : '\0';
+
+            if (inComment)
+            {
+                if (character == '*' && next == '/')
+                {
+                    inComment = false;
+                    index++;
+                }
+
+                continue;
+            }
+
+            if (quote != '\0')
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                    continue;
+                }
+
+                if (character == '\\')
+                {
+                    escaped = true;
+                    continue;
+                }
+
+                if (character == quote)
+                {
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            if (character == '/' && next == '*')
+            {
+                inComment = true;
+                index++;
+                continue;
+            }
+
+            if (character is '\'' or '"')
+            {
+                quote = character;
+                continue;
+            }
+
+            if (character == '\\')
+            {
+                index++;
+                continue;
+            }
+
+            if (character == '{')
+            {
+                depth++;
+                continue;
+            }
+
+            if (character == '}')
+            {
+                depth--;
+                if (depth < 0)
+                {
+                    completedSource = source;
+                    return false;
+                }
+            }
+        }
+
+        if (inComment || quote != '\0' || depth != 1)
+        {
+            completedSource = source;
+            return false;
+        }
+
+        completedSource = source.TrimEnd() + Environment.NewLine + '}';
+        return true;
     }
 
     private static SnapshotDiagnostic CreatePreservedDiagnostic(
