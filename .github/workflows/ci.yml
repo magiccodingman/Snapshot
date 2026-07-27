@@ -108,7 +108,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         shell: pwsh
         run: |
-          $version = (Select-String -Path eng/Versions.props -Pattern '<SnapshotPackageVersion>(.*?)</SnapshotPackageVersion>').Matches.Groups[1].Value
+          $version = (Select-String -Path eng/Versions.props -Pattern '<SnapshotCliPackageVersion>(.*?)</SnapshotCliPackageVersion>').Matches.Groups[1].Value
           dotnet tool install Snapshot.Cli --version $version --tool-path artifacts/tool-test --add-source artifacts/packages --ignore-failed-sources
           ./artifacts/tool-test/snapshot help
       - name: Upload pack diagnostics
