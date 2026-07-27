@@ -62,6 +62,78 @@ public sealed class BlazorInlineCssProcessorTests
     }
 
     [Fact]
+    public async Task Generated_split_heading_with_one_missing_outer_brace_is_completed_after_eof_validation()
+    {
+        const string css = """
+            <!--!-->
+            .hero { display: flex; }
+            <!--!-->@media (max-width: 600px)
+            {
+                .overlay-text h 1
+                {
+                    font-size: 2rem;
+                }
+                .overlay-text::before { content: "}"; }
+            <!--!-->
+            """;
+        var html = CreateHtml("/", css);
+        var options = CreateCssOnlyOptions();
+
+        var result = await SnapshotProcessorFactory.Create(options)
+            .ProcessAsync(new SnapshotProcessingContext(SnapshotRoute.Parse("/"), html));
+
+        Assert.DoesNotContain(result.Diagnostics, diagnostic =>
+            diagnostic.Code == SnapshotDiagnosticCodes.InlineCssPreserved);
+
+        var processedCss = new HtmlParser().ParseDocument(result.Html).QuerySelector("style")!.TextContent;
+        Assert.DoesNotContain("<!--!-->", processedCss, StringComparison.Ordinal);
+        Assert.DoesNotContain("h 1", processedCss, StringComparison.Ordinal);
+        Assert.Contains(".overlay-text h1", processedCss, StringComparison.Ordinal);
+        Assert.Contains("content:\"}\"", processedCss, StringComparison.Ordinal);
+        Assert.Contains("@media", processedCss, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Missing_brace_without_a_known_heading_repair_is_not_completed()
+    {
+        const string css = """
+            <!--!-->@media (max-width: 600px)
+            {
+                .card { color: red; }
+            <!--!-->
+            """;
+        var html = CreateHtml("/", css);
+        var options = CreateCssOnlyOptions();
+
+        var result = await SnapshotProcessorFactory.Create(options)
+            .ProcessAsync(new SnapshotProcessingContext(SnapshotRoute.Parse("/"), html));
+
+        Assert.Single(result.Diagnostics, item =>
+            item.Code == SnapshotDiagnosticCodes.InlineCssPreserved);
+    }
+
+    [Fact]
+    public async Task More_than_one_missing_brace_is_not_completed()
+    {
+        const string css = """
+            <!--!-->@media (max-width: 600px)
+            {
+                .overlay-text h 1
+                {
+                    font-size: 2rem;
+            <!--!-->
+            """;
+        var html = CreateHtml("/", css);
+        var options = CreateCssOnlyOptions();
+
+        var result = await SnapshotProcessorFactory.Create(options)
+            .ProcessAsync(new SnapshotProcessingContext(SnapshotRoute.Parse("/"), html));
+
+        Assert.Single(result.Diagnostics, item =>
+            item.Code == SnapshotDiagnosticCodes.InlineCssPreserved);
+    }
+
+    [Fact]
     public async Task Arbitrary_invalid_selectors_are_not_guess_repaired()
     {
         const string css = """
