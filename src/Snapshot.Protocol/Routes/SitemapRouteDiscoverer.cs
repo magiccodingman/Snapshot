@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Xml.Linq;
 using Snapshot.Protocol.Diagnostics;
+using Snapshot.Protocol.Metadata;
 
 namespace Snapshot.Protocol.Routes;
 
@@ -13,6 +14,7 @@ public sealed class SitemapRouteDiscoverer
     {
         var routes = new List<SnapshotRoute>();
         var diagnostics = new List<SnapshotDiagnostic>();
+        var declarations = new Dictionary<string, SitemapRepresentationDeclaration>(StringComparer.Ordinal);
 
         if (options.Mode is SnapshotRouteDiscoveryMode.SitemapsAndExplicit or SnapshotRouteDiscoveryMode.SitemapsOnly)
         {
@@ -21,15 +23,34 @@ public sealed class SitemapRouteDiscoverer
                          .OrderBy(static path => path, StringComparer.Ordinal))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await ParseCandidateAsync(path, routes, diagnostics, cancellationToken).ConfigureAwait(false);
+                await ParseCandidateAsync(path, routes, declarations, diagnostics, cancellationToken).ConfigureAwait(false);
             }
         }
 
         if (options.Mode is SnapshotRouteDiscoveryMode.SitemapsAndExplicit or SnapshotRouteDiscoveryMode.ExplicitOnly)
         {
-            foreach (var route in options.AdditionalRoutes)
+            foreach (var value in options.AdditionalRoutes)
             {
-                TryAddRoute(route, "explicit route", routes, diagnostics);
+                if (!TryParseRoute(value, "explicit route", diagnostics, out var route))
+                {
+                    continue;
+                }
+
+                if (declarations.TryGetValue(route.Path, out var declaration) &&
+                    declaration.Representation == SitemapRepresentation.ClientRendered)
+                {
+                    diagnostics.Add(new SnapshotDiagnostic(
+                        SnapshotDiagnosticCodes.SitemapRepresentationConflict,
+                        SnapshotDiagnosticSeverity.Error,
+                        $"Explicit route {route.Path} conflicts with a sitemap declaration of {SnapshotRepresentationMetadata.ClientRendered}.",
+                        route.Path,
+                        declaration.Source,
+                        route.OutputPath.Value,
+                        "Remove the explicit route override or change the sitemap representation declaration."));
+                    continue;
+                }
+
+                routes.Add(route);
             }
         }
 
@@ -70,7 +91,7 @@ public sealed class SitemapRouteDiscoverer
             diagnostics.Add(new SnapshotDiagnostic(
                 SnapshotDiagnosticCodes.NoRoutes,
                 SnapshotDiagnosticSeverity.Error,
-                "No <urlset> sitemap routes or explicit routes were discovered."));
+                "No eligible <urlset> sitemap routes or explicit routes were discovered."));
         }
 
         return (exact.Values.OrderBy(static route => route.Path, StringComparer.Ordinal).ToArray(), diagnostics);
@@ -83,6 +104,7 @@ public sealed class SitemapRouteDiscoverer
     private static async Task ParseCandidateAsync(
         string path,
         ICollection<SnapshotRoute> routes,
+        IDictionary<string, SitemapRepresentationDeclaration> declarations,
         ICollection<SnapshotDiagnostic> diagnostics,
         CancellationToken cancellationToken)
     {
@@ -95,24 +117,49 @@ public sealed class SitemapRouteDiscoverer
 
             var document = await XDocument.LoadAsync(input, LoadOptions.None, cancellationToken).ConfigureAwait(false);
             var root = document.Root;
-            if (root is null)
+            if (root is null ||
+                root.Name.LocalName.Equals("sitemapindex", StringComparison.OrdinalIgnoreCase) ||
+                !root.Name.LocalName.Equals("urlset", StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
 
-            if (root.Name.LocalName.Equals("sitemapindex", StringComparison.OrdinalIgnoreCase))
+            foreach (var url in root.Elements().Where(static node => node.Name.LocalName.Equals("url", StringComparison.OrdinalIgnoreCase)))
             {
-                return;
-            }
+                var location = url.Elements().FirstOrDefault(static node => node.Name.LocalName.Equals("loc", StringComparison.OrdinalIgnoreCase));
+                if (location is null || !TryParseRoute(location.Value, path, diagnostics, out var route))
+                {
+                    continue;
+                }
 
-            if (!root.Name.LocalName.Equals("urlset", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
+                var representationNodes = url.Elements()
+                    .Where(static node =>
+                        node.Name.NamespaceName.Equals(SnapshotRepresentationMetadata.XmlNamespaceUri, StringComparison.Ordinal) &&
+                        node.Name.LocalName.Equals(SnapshotRepresentationMetadata.RepresentationElementName, StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
 
-            foreach (var location in root.Descendants().Where(static node => node.Name.LocalName == "loc"))
-            {
-                TryAddRoute(location.Value, path, routes, diagnostics);
+                if (representationNodes.Length > 1)
+                {
+                    diagnostics.Add(new SnapshotDiagnostic(
+                        SnapshotDiagnosticCodes.SitemapRepresentationInvalid,
+                        SnapshotDiagnosticSeverity.Error,
+                        "A sitemap URL contains multiple rendering representation declarations.",
+                        route.Path,
+                        path));
+                    continue;
+                }
+
+                var representation = ParseRepresentation(representationNodes.SingleOrDefault()?.Value, route, path, diagnostics);
+                if (representation is null)
+                {
+                    continue;
+                }
+
+                RegisterDeclaration(route, representation.Value, path, declarations, diagnostics);
+                if (representation != SitemapRepresentation.ClientRendered)
+                {
+                    routes.Add(route);
+                }
             }
         }
         catch (Exception exception) when (exception is InvalidDataException or System.Xml.XmlException or IOException)
@@ -128,15 +175,76 @@ public sealed class SitemapRouteDiscoverer
         }
     }
 
-    private static void TryAddRoute(
+    private static SitemapRepresentation? ParseRepresentation(
+        string? value,
+        SnapshotRoute route,
+        string source,
+        ICollection<SnapshotDiagnostic> diagnostics)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return SitemapRepresentation.DefaultPrerender;
+        }
+
+        if (SnapshotRepresentationMetadata.IsStaticPrerendered(value))
+        {
+            return SitemapRepresentation.StaticPrerendered;
+        }
+
+        if (SnapshotRepresentationMetadata.IsClientRendered(value))
+        {
+            return SitemapRepresentation.ClientRendered;
+        }
+
+        diagnostics.Add(new SnapshotDiagnostic(
+            SnapshotDiagnosticCodes.SitemapRepresentationInvalid,
+            SnapshotDiagnosticSeverity.Error,
+            $"Unsupported rendering representation '{value.Trim()}'. Supported values are {SnapshotRepresentationMetadata.StaticPrerendered}, {SnapshotRepresentationMetadata.LegacyPrerendered}, and {SnapshotRepresentationMetadata.ClientRendered}.",
+            route.Path,
+            source));
+        return null;
+    }
+
+    private static void RegisterDeclaration(
+        SnapshotRoute route,
+        SitemapRepresentation representation,
+        string source,
+        IDictionary<string, SitemapRepresentationDeclaration> declarations,
+        ICollection<SnapshotDiagnostic> diagnostics)
+    {
+        if (!declarations.TryGetValue(route.Path, out var existing))
+        {
+            declarations[route.Path] = new SitemapRepresentationDeclaration(representation, source);
+            return;
+        }
+
+        var existingIsClient = existing.Representation == SitemapRepresentation.ClientRendered;
+        var currentIsClient = representation == SitemapRepresentation.ClientRendered;
+        if (existingIsClient == currentIsClient)
+        {
+            return;
+        }
+
+        diagnostics.Add(new SnapshotDiagnostic(
+            SnapshotDiagnosticCodes.SitemapRepresentationConflict,
+            SnapshotDiagnosticSeverity.Error,
+            $"Route {route.Path} is declared both {SnapshotRepresentationMetadata.ClientRendered} and prerenderable across sitemap files.",
+            route.Path,
+            source,
+            route.OutputPath.Value,
+            $"Make the representation consistent with {existing.Source}."));
+    }
+
+    private static bool TryParseRoute(
         string value,
         string source,
-        ICollection<SnapshotRoute> routes,
-        ICollection<SnapshotDiagnostic> diagnostics)
+        ICollection<SnapshotDiagnostic> diagnostics,
+        out SnapshotRoute route)
     {
         try
         {
-            routes.Add(SnapshotRoute.Parse(value, source));
+            route = SnapshotRoute.Parse(value, source);
+            return true;
         }
         catch (SnapshotRouteException exception)
         {
@@ -150,6 +258,19 @@ public sealed class SitemapRouteDiscoverer
                 exception.Message,
                 value,
                 source));
+            route = null!;
+            return false;
         }
     }
+
+    private enum SitemapRepresentation
+    {
+        DefaultPrerender,
+        StaticPrerendered,
+        ClientRendered
+    }
+
+    private sealed record SitemapRepresentationDeclaration(
+        SitemapRepresentation Representation,
+        string Source);
 }
