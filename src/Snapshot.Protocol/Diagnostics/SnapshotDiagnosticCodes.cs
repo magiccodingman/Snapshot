@@ -12,6 +12,8 @@ public static class SnapshotDiagnosticCodes
     public const string ExistingFilePreserved = "OUTPUT102";
     public const string OutputCollision = "OUTPUT201";
     public const string SitemapInvalid = "SITEMAP001";
+    public const string SitemapRepresentationInvalid = "SITEMAP002";
+    public const string SitemapRepresentationConflict = "SITEMAP003";
     public const string SnapshotMissingCanonical = "HTML005";
     public const string SnapshotInvalid = "HTML010";
     public const string CanonicalMissing = "SEO001";
@@ -21,6 +23,7 @@ public static class SnapshotDiagnosticCodes
     public const string InlineJsonInvalid = "PROCESS001";
     public const string InlineCssPreserved = "PROCESS101";
     public const string HtmlMinificationPreserved = "PROCESS102";
+    public const string HtmlMetadataPreserved = "PROCESS103";
     public const string ProcessingInvalid = "PROCESS201";
     public const string DuplicateEtag = "HOST001";
     public const string BrowserFailure = "BROWSER001";
