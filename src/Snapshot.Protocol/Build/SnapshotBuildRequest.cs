@@ -9,6 +9,12 @@ public enum SnapshotTargetFilesystem
     Windows
 }
 
+public enum SnapshotCaseAliasStrategy
+{
+    SingleSegment,
+    Exhaustive
+}
+
 public sealed class SnapshotBuildRequest
 {
     public required string SourceDirectory { get; init; }
@@ -42,6 +48,8 @@ public sealed class SnapshotRootGatewayOptions
 public sealed class SnapshotCaseAliasOptions
 {
     public bool Enabled { get; init; } = true;
+
+    public SnapshotCaseAliasStrategy Strategy { get; init; } = SnapshotCaseAliasStrategy.SingleSegment;
 
     public bool GenerateMissingPrefixGateways { get; init; } = true;
 

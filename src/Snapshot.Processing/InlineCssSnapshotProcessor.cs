@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using AngleSharp.Html.Parser;
 using NUglify;
@@ -13,6 +14,10 @@ namespace Snapshot.Processing;
 internal sealed class InlineCssSnapshotProcessor : ISnapshotProcessor
 {
     private const string BlazorEmptyRenderMarker = "<!--!-->";
+    private static readonly Regex SplitHeadingSelectorRegex = new(
+        @"(^|[\s>+~,])h\s+([1-6])(?=\s*(?:[.#:\[>+~,{]))",
+        RegexOptions.Multiline | RegexOptions.CultureInvariant);
+
     private readonly ISnapshotProcessor _inner;
     private readonly ConcurrentDictionary<string, byte> _reportedFallbacks = new(StringComparer.Ordinal);
     private readonly HtmlParser _parser = new();
@@ -51,7 +56,23 @@ internal sealed class InlineCssSnapshotProcessor : ISnapshotProcessor
             }
 
             var (source, removedMarkers) = RemoveBlazorRenderMarkers(originalSource);
-            var result = Uglify.Css(source, $"{context.Route.Path}#style-{index}", CreateSafeCssSettings());
+            var result = Minify(source, context.Route.Path, index, "");
+            var repairedHeadingSelectors = 0;
+
+            if (result.HasErrors || string.IsNullOrEmpty(result.Code))
+            {
+                var repairedSource = RepairSplitHeadingSelectors(source, out repairedHeadingSelectors);
+                if (repairedHeadingSelectors > 0)
+                {
+                    var repairedResult = Minify(repairedSource, context.Route.Path, index, "-repaired");
+                    if (!repairedResult.HasErrors && !string.IsNullOrEmpty(repairedResult.Code))
+                    {
+                        source = repairedSource;
+                        result = repairedResult;
+                    }
+                }
+            }
+
             if (result.HasErrors || string.IsNullOrEmpty(result.Code))
             {
                 if (removedMarkers > 0)
@@ -73,13 +94,10 @@ internal sealed class InlineCssSnapshotProcessor : ISnapshotProcessor
                 continue;
             }
 
-            var verification = Uglify.Css(
-                result.Code,
-                $"{context.Route.Path}#style-{index}-verification",
-                CreateSafeCssSettings());
+            var verification = Minify(result.Code, context.Route.Path, index, "-verification");
             if (verification.HasErrors)
             {
-                if (removedMarkers > 0)
+                if (removedMarkers > 0 || repairedHeadingSelectors > 0)
                 {
                     style.TextContent = source;
                     changed = true;
@@ -125,6 +143,9 @@ internal sealed class InlineCssSnapshotProcessor : ISnapshotProcessor
         };
     }
 
+    private static UglifyResult Minify(string source, string route, int index, string suffix) =>
+        Uglify.Css(source, $"{route}#style-{index}{suffix}", CreateSafeCssSettings());
+
     private bool ShouldReportFallback(string source, string stage)
     {
         var bytes = Encoding.UTF8.GetBytes(source);
@@ -145,6 +166,18 @@ internal sealed class InlineCssSnapshotProcessor : ISnapshotProcessor
         return count == 0
             ? (source, 0)
             : (source.Replace(BlazorEmptyRenderMarker, string.Empty, StringComparison.Ordinal), count);
+    }
+
+    private static string RepairSplitHeadingSelectors(string source, out int repairedSelectors)
+    {
+        var count = 0;
+        var repaired = SplitHeadingSelectorRegex.Replace(source, match =>
+        {
+            count++;
+            return $"{match.Groups[1].Value}h{match.Groups[2].Value}";
+        });
+        repairedSelectors = count;
+        return repaired;
     }
 
     private static SnapshotDiagnostic CreatePreservedDiagnostic(

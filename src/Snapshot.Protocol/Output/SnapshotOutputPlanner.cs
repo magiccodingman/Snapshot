@@ -93,7 +93,7 @@ public sealed class SnapshotOutputPlanner
 
             foreach (var canonicalRoute in aliasSources)
             {
-                var aliases = GenerateCaseVariants(canonicalRoute)
+                var aliases = GenerateCaseVariants(canonicalRoute, aliasOptions.Strategy)
                     .Where(alias => !alias.Equals(canonicalRoute, StringComparison.Ordinal))
                     .ToArray();
 
@@ -142,7 +142,9 @@ public sealed class SnapshotOutputPlanner
         };
     }
 
-    public static IEnumerable<string> GenerateCaseVariants(string route)
+    public static IEnumerable<string> GenerateCaseVariants(
+        string route,
+        SnapshotCaseAliasStrategy strategy = SnapshotCaseAliasStrategy.SingleSegment)
     {
         if (route == "/")
         {
@@ -150,17 +152,48 @@ public sealed class SnapshotOutputPlanner
         }
 
         var segments = route.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var variants = segments.Select(GetSegmentVariants).ToArray();
-        var current = new string[segments.Length];
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var candidate in Expand(0))
+        foreach (var candidate in strategy switch
+                 {
+                     SnapshotCaseAliasStrategy.SingleSegment => GenerateSingleSegmentVariants(segments),
+                     SnapshotCaseAliasStrategy.Exhaustive => GenerateExhaustiveVariants(segments),
+                     _ => throw new ArgumentOutOfRangeException(nameof(strategy), strategy, "Unsupported case alias strategy.")
+                 })
         {
             if (seen.Add(candidate))
             {
                 yield return candidate;
             }
         }
+    }
+
+    private static IEnumerable<string> GenerateSingleSegmentVariants(IReadOnlyList<string> segments)
+    {
+        yield return '/' + string.Join('/', segments);
+
+        for (var index = 0; index < segments.Count; index++)
+        {
+            foreach (var variant in GetSegmentVariants(segments[index]))
+            {
+                if (variant.Equals(segments[index], StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var candidate = segments.ToArray();
+                candidate[index] = variant;
+                yield return '/' + string.Join('/', candidate);
+            }
+        }
+    }
+
+    private static IEnumerable<string> GenerateExhaustiveVariants(IReadOnlyList<string> segments)
+    {
+        var variants = segments.Select(GetSegmentVariants).ToArray();
+        var current = new string[segments.Count];
+
+        return Expand(0);
 
         IEnumerable<string> Expand(int index)
         {

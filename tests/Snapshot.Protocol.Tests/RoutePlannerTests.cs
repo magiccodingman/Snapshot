@@ -24,6 +24,40 @@ public sealed class RoutePlannerTests
     }
 
     [Fact]
+    public void Single_segment_aliases_do_not_combine_case_changes_across_segments()
+    {
+        var variants = SnapshotOutputPlanner.GenerateCaseVariants(
+                "/docs/setup/path1",
+                SnapshotCaseAliasStrategy.SingleSegment)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.Contains("/DOCS/setup/path1", variants);
+        Assert.Contains("/docs/SETUP/path1", variants);
+        Assert.Contains("/docs/setup/PATH1", variants);
+        Assert.DoesNotContain("/DOCS/SETUP/path1", variants);
+        Assert.DoesNotContain("/DOCS/SETUP/PATH1", variants);
+        Assert.Equal(7, variants.Count);
+    }
+
+    [Fact]
+    public void Exhaustive_aliases_preserve_all_case_combinations_when_requested()
+    {
+        var variants = SnapshotOutputPlanner.GenerateCaseVariants(
+                "/docs/setup/path1",
+                SnapshotCaseAliasStrategy.Exhaustive)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.Contains("/DOCS/SETUP/PATH1", variants);
+        Assert.True(variants.Count > 7);
+    }
+
+    [Fact]
+    public void Case_alias_options_default_to_single_segment_strategy()
+    {
+        Assert.Equal(SnapshotCaseAliasStrategy.SingleSegment, new SnapshotCaseAliasOptions().Strategy);
+    }
+
+    [Fact]
     public void Root_maps_to_index_subdirectory()
     {
         var route = SnapshotRoute.Parse("/");
