@@ -13,7 +13,7 @@ The release guard requires a client version bump when publishable client inputs 
 - `client/package-lock.json`
 - `client/build.mjs`
 
-The npm workflow is triggered only by `client/**` changes on `release`, or manually with `workflow_dispatch`. It does not run for root README, license, or logo changes. Those files are copied into the package during its next intentional client release.
+The npm workflow is triggered only by those publishable client inputs on `release`, or manually with `workflow_dispatch`. Test-only edits and root README, license, or logo changes do not start publishing. The root files are copied into the package during its next intentional client release.
 
 Before publishing, the workflow installs dependencies, tests, and builds the client. It checks whether the exact package version already exists and skips it when present. New versions publish through npm Trusted Publishing and GitHub OIDC; no long-lived npm publish token is stored.
 
