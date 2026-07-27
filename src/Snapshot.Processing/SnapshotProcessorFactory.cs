@@ -12,11 +12,30 @@ public static class SnapshotProcessorFactory
             return PassthroughSnapshotProcessor.Instance;
         }
 
-        var standard = new StandardSnapshotProcessor(options);
+        var standardOptions = CloneOptions(options);
+        standardOptions.MinifyInlineCss = false;
+
+        ISnapshotProcessor processor = new StandardSnapshotProcessor(standardOptions);
+        if (options.MinifyInlineCss)
+        {
+            processor = new InlineCssSnapshotProcessor(processor);
+        }
+
         return HasTransformations(options)
-            ? standard
-            : new ValidationOnlySnapshotProcessor(standard);
+            ? processor
+            : new ValidationOnlySnapshotProcessor(processor);
     }
+
+    private static SnapshotProcessingOptions CloneOptions(SnapshotProcessingOptions options) => new()
+    {
+        Enabled = options.Enabled,
+        MinifyHtml = options.MinifyHtml,
+        RemoveHtmlComments = options.RemoveHtmlComments,
+        MinifyInlineJson = options.MinifyInlineJson,
+        ValidateInlineJson = options.ValidateInlineJson,
+        MinifyInlineCss = options.MinifyInlineCss,
+        CanonicalPolicy = options.CanonicalPolicy
+    };
 
     private static bool HasTransformations(SnapshotProcessingOptions options) =>
         options.MinifyHtml ||
@@ -26,9 +45,9 @@ public static class SnapshotProcessorFactory
 
     private sealed class ValidationOnlySnapshotProcessor : ISnapshotProcessor
     {
-        private readonly StandardSnapshotProcessor _validator;
+        private readonly ISnapshotProcessor _validator;
 
-        public ValidationOnlySnapshotProcessor(StandardSnapshotProcessor validator)
+        public ValidationOnlySnapshotProcessor(ISnapshotProcessor validator)
         {
             _validator = validator;
         }
