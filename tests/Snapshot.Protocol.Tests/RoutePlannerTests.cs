@@ -24,6 +24,63 @@ public sealed class RoutePlannerTests
     }
 
     [Fact]
+    public void Canonical_parent_aliases_only_vary_the_final_segment()
+    {
+        var variants = SnapshotOutputPlanner.GenerateCaseVariants("/docs/setup/path1")
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.Contains("/docs/setup/path1", variants);
+        Assert.Contains("/docs/setup/Path1", variants);
+        Assert.Contains("/docs/setup/PATH1", variants);
+        Assert.DoesNotContain("/Docs/setup/path1", variants);
+        Assert.DoesNotContain("/docs/Setup/path1", variants);
+        Assert.DoesNotContain("/DOCS/SETUP/PATH1", variants);
+        Assert.Equal(3, variants.Count);
+    }
+
+    [Fact]
+    public void Canonical_parent_planning_does_not_build_alias_subtrees()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "index.html"), "loader");
+            var routes = new[]
+            {
+                SnapshotRoute.Parse("/docs"),
+                SnapshotRoute.Parse("/docs/setup"),
+                SnapshotRoute.Parse("/docs/setup/path1")
+            };
+
+            var plan = new SnapshotOutputPlanner().Create(
+                root,
+                routes,
+                SnapshotTargetFilesystem.CaseSensitive,
+                new SnapshotCaseAliasOptions(),
+                []);
+
+            var aliases = plan.GeneratedEntries
+                .Where(static entry => entry.Kind == SnapshotGeneratedEntryKind.CaseAlias)
+                .Select(static entry => entry.Route)
+                .ToHashSet(StringComparer.Ordinal);
+
+            Assert.Contains("/Docs", aliases);
+            Assert.Contains("/DOCS", aliases);
+            Assert.Contains("/docs/Setup", aliases);
+            Assert.Contains("/docs/SETUP", aliases);
+            Assert.Contains("/docs/setup/Path1", aliases);
+            Assert.Contains("/docs/setup/PATH1", aliases);
+            Assert.DoesNotContain("/Docs/setup", aliases);
+            Assert.DoesNotContain("/DOCS/setup/path1", aliases);
+            Assert.DoesNotContain("/docs/Setup/path1", aliases);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Single_segment_aliases_do_not_combine_case_changes_across_segments()
     {
         var variants = SnapshotOutputPlanner.GenerateCaseVariants(
@@ -52,9 +109,9 @@ public sealed class RoutePlannerTests
     }
 
     [Fact]
-    public void Case_alias_options_default_to_single_segment_strategy()
+    public void Case_alias_options_default_to_canonical_parent_strategy()
     {
-        Assert.Equal(SnapshotCaseAliasStrategy.SingleSegment, new SnapshotCaseAliasOptions().Strategy);
+        Assert.Equal(SnapshotCaseAliasStrategy.CanonicalParent, new SnapshotCaseAliasOptions().Strategy);
     }
 
     [Fact]
