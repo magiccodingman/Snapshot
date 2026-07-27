@@ -44,6 +44,14 @@ Add the browser client to your application loader. Sites that deliberately want 
 </script>
 ```
 
+The minified npm build above is the recommended browser script for most applications. `@latest` follows the newest published client release. Deployments that require a permanently pinned client can replace it with an exact version such as:
+
+```text
+https://cdn.jsdelivr.net/npm/@magiccodingman/snapshot-protocol@0.1.0/dist/snapshot-protocol.min.js
+```
+
+For debugging, use the readable distribution file by replacing `snapshot-protocol.min.js` with `snapshot-protocol.js`. See [Browser client](docs/client-script.md) for the complete client contract and CDN options.
+
 When a route has reached its final state, render:
 
 ```html
@@ -55,9 +63,12 @@ When a route has reached its final state, render:
 </snapshot-ready>
 ```
 
-Install the CLI:
+### .NET prerequisite and CLI
+
+Snapshot currently targets .NET 10. Install the matching .NET SDK or runtime before installing and running the CLI. The repository's authoritative target framework is defined in [`Directory.Build.props`](Directory.Build.props), while project-specific requirements live in the corresponding `.csproj` files. Check those files if this README has not yet been updated for a newer target.
 
 ```bash
+dotnet --version
 dotnet tool install --global Snapshot.Cli
 snapshot browser install
 snapshot build ./publish/wwwroot --output ./site.snapshot.zip
@@ -218,8 +229,12 @@ IPFS subdomain gateways and DNSLink provide a proper application origin. Legacy 
 
 - `main` is active upstream development.
 - `release` is the protected stable source.
-- NuGet and npm publishing workflows run only after promotion to `release`.
+- npm publishing runs only for `client/**` changes and uses npm Trusted Publishing through GitHub OIDC. The client version in `client/package.json` determines whether a new package is published.
+- `Snapshot.Protocol`, `Snapshot.Processing`, `Snapshot.Playwright`, and `Snapshot.Cli` have independent versions in `eng/Versions.props`. A release publishes only package versions that do not already exist on NuGet.org.
+- README, license, and logo edits do not automatically create package releases. They are included the next time an intentionally versioned package is published; manual workflow runs are available for rerunning that release automation when needed.
 - GitHub releases and immutable tags remain manually authored archival milestones.
+
+See [Release process](docs/release-process.md) for the exact version properties, trusted-publishing setup, and workflow behavior.
 
 ## Documentation
 
