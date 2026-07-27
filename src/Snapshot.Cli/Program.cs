@@ -266,9 +266,10 @@ internal static class SnapshotCli
 
     private static SnapshotCaseAliasStrategy ParseCaseAliasStrategy(string? value) => value?.ToLowerInvariant() switch
     {
-        null or "single-segment" or "lean" => SnapshotCaseAliasStrategy.SingleSegment,
+        null or "canonical-parent" or "parent" or "default" or "lean" => SnapshotCaseAliasStrategy.CanonicalParent,
+        "single-segment" => SnapshotCaseAliasStrategy.SingleSegment,
         "exhaustive" or "all-combinations" => SnapshotCaseAliasStrategy.Exhaustive,
-        _ => throw new ArgumentException("--case-alias-strategy must be single-segment or exhaustive.")
+        _ => throw new ArgumentException("--case-alias-strategy must be canonical-parent, single-segment, or exhaustive.")
     };
 
     private static SnapshotTargetFilesystem ParseTarget(string? value) => value?.ToLowerInvariant() switch
@@ -346,7 +347,7 @@ Build options:
   --route-discovery <mode>             sitemaps-and-explicit, sitemaps-only, explicit-only
   --no-root-gateway                    Do not generate /index/index.html for route /
   --no-case-aliases
-  --case-alias-strategy <mode>         single-segment (default) or exhaustive
+  --case-alias-strategy <mode>         canonical-parent (default), single-segment, or exhaustive
   --no-missing-prefix-gateways
   --maximum-aliases-per-route <count>  No limit by default
   --startup-timeout <seconds>          Default: 60
