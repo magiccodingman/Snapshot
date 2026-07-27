@@ -1,9 +1,11 @@
 using System.Diagnostics;
+using AngleSharp.Html.Parser;
 using Snapshot.Playwright;
 using Snapshot.Processing;
 using Snapshot.Protocol.Archive;
 using Snapshot.Protocol.Build;
 using Snapshot.Protocol.Hosting;
+using Snapshot.Protocol.Metadata;
 using Snapshot.Protocol.Routes;
 using Snapshot.TestHost;
 using Xunit;
@@ -47,12 +49,14 @@ public sealed class SnapshotEndToEndTests
             });
 
             Assert.True(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(diagnostic => $"{diagnostic.Code}: {diagnostic.Message}")));
+            Assert.Equal(sourceLoader, await File.ReadAllTextAsync(Path.Combine(webRoot, "index.html")));
 
             await using (var archive = await SnapshotArchive.OpenAsync(output))
             {
                 var archivedLoader = await archive.ReadTextAsync("index.html");
                 var rootGateway = await archive.ReadTextAsync("index/index.html");
-                Assert.Equal(sourceLoader, archivedLoader);
+                AssertRenderingMetadata(archivedLoader);
+                AssertRenderingMetadata(rootGateway);
                 Assert.Contains("data-test-page-id=\"home\"", rootGateway, StringComparison.Ordinal);
                 Assert.Contains("data-snapshot-route=\"/\"", rootGateway, StringComparison.Ordinal);
                 Assert.Contains("snapshot:route", rootGateway, StringComparison.Ordinal);
@@ -73,6 +77,10 @@ public sealed class SnapshotEndToEndTests
             Assert.Contains("data-test-page-id=\"immediate\"", immediate, StringComparison.Ordinal);
             Assert.Contains("data-test-page-id=\"delayed\"", delayed, StringComparison.Ordinal);
             Assert.Contains("data-test-page-id=\"unicode-cafe\"", unicode, StringComparison.Ordinal);
+            AssertRenderingMetadata(rootGatewayResponse);
+            AssertRenderingMetadata(immediate);
+            AssertRenderingMetadata(delayed);
+            AssertRenderingMetadata(unicode);
 
             var noRootOutput = Path.Combine(outputRoot, "no-root-gateway.zip");
             var noRoot = await engine.BuildAsync(new SnapshotBuildRequest
@@ -97,7 +105,7 @@ public sealed class SnapshotEndToEndTests
             Assert.Empty(noRoot.Routes);
             await using (var noRootArchive = await SnapshotArchive.OpenAsync(noRootOutput))
             {
-                Assert.Equal(sourceLoader, await noRootArchive.ReadTextAsync("index.html"));
+                AssertRenderingMetadata(await noRootArchive.ReadTextAsync("index.html"));
                 Assert.Null(noRootArchive.TryGetFile("index/index.html"));
             }
 
@@ -206,6 +214,8 @@ public sealed class SnapshotEndToEndTests
             await using var archive = await SnapshotArchive.OpenAsync(output);
             var html = await archive.ReadTextAsync("target/index.html");
             Assert.Contains("data-test-page-id=\"loader-target\"", html, StringComparison.Ordinal);
+            AssertRenderingMetadata(html);
+            AssertRenderingMetadata(await archive.ReadTextAsync("index.html"));
         }
         finally
         {
@@ -214,6 +224,17 @@ public sealed class SnapshotEndToEndTests
                 Directory.Delete(testRoot, recursive: true);
             }
         }
+    }
+
+    private static void AssertRenderingMetadata(string html)
+    {
+        var document = new HtmlParser().ParseDocument(html);
+        Assert.Equal(
+            SnapshotRepresentationMetadata.StaticPrerendered,
+            document.QuerySelector("meta[name=rendering-mode]")?.GetAttribute("content"));
+        Assert.Equal(
+            SnapshotRepresentationMetadata.SnapshotProtocolMetaContent,
+            document.QuerySelector("meta[name=snapshot-protocol]")?.GetAttribute("content"));
     }
 
     private static string FindRepositoryRoot()
