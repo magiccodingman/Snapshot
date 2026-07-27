@@ -103,26 +103,32 @@ public sealed class SnapshotZipWriter
                 continue;
             }
 
+            var isRootLoader = archivePath.Equals("index.html", StringComparison.Ordinal);
+            var isCanonicalSource = canonicalByOutputPath.TryGetValue(archivePath, out var canonicalSourceRoute);
             (long Length, string Hash) sourceResult;
             if (sitemapAnnotations.Entries.TryGetValue(archivePath, out var annotatedSitemap))
             {
                 await using var input = new MemoryStream(annotatedSitemap, writable: false);
                 sourceResult = await WriteStreamEntryAsync(archive, archivePath, input, cancellationToken).ConfigureAwait(false);
             }
-            else if (archivePath.Equals("index.html", StringComparison.Ordinal))
+            else if (archivePath.EndsWith(".html", StringComparison.OrdinalIgnoreCase) &&
+                     (isRootLoader || isCanonicalSource))
             {
                 var sourceHtml = await File.ReadAllTextAsync(sourceFile, cancellationToken).ConfigureAwait(false);
                 var annotation = SnapshotHtmlMetadataAnnotator.Annotate(sourceHtml);
                 if (annotation.FailureReason is not null)
                 {
+                    var description = isRootLoader
+                        ? "Root index.html"
+                        : $"Canonical source snapshot {canonicalSourceRoute!.Path}";
                     processingDiagnostics.Add(new SnapshotDiagnostic(
                         SnapshotDiagnosticCodes.HtmlMetadataPreserved,
                         SnapshotDiagnosticSeverity.Warning,
-                        $"Root index.html rendering metadata was not added because {annotation.FailureReason}",
-                        "/",
+                        $"{description} rendering metadata was not added because {annotation.FailureReason}",
+                        isRootLoader ? "/" : canonicalSourceRoute!.Path,
                         sourceFile,
                         archivePath,
-                        "The source loader was copied unchanged into the artifact."));
+                        "The source HTML was copied unchanged into the artifact."));
                 }
 
                 if (annotation.Changed)
@@ -141,15 +147,12 @@ public sealed class SnapshotZipWriter
                 sourceResult = await WriteStreamEntryAsync(archive, archivePath, input, cancellationToken).ConfigureAwait(false);
             }
 
-            var canonicalRoute = canonicalByOutputPath.TryGetValue(archivePath, out var manualRoute)
-                ? manualRoute.Path
-                : null;
             manifestEntries.Add(new SnapshotManifestEntry(
                 archivePath,
                 SnapshotManifestEntryKind.Source,
                 sourceResult.Length,
                 sourceResult.Hash,
-                Route: canonicalRoute));
+                Route: isCanonicalSource ? canonicalSourceRoute!.Path : null));
             progress?.Report(new SnapshotProgress(SnapshotProgressStage.WritingArchive, $"Copied {archivePath}", ++completed, total));
         }
 
