@@ -170,12 +170,14 @@ internal sealed class InlineCssSnapshotProcessor : ISnapshotProcessor
 
     private static string RepairSplitHeadingSelectors(string source, out int repairedSelectors)
     {
-        repairedSelectors = 0;
-        return SplitHeadingSelectorRegex.Replace(source, match =>
+        var count = 0;
+        var repaired = SplitHeadingSelectorRegex.Replace(source, match =>
         {
-            repairedSelectors++;
+            count++;
             return $"{match.Groups[1].Value}h{match.Groups[2].Value}";
         });
+        repairedSelectors = count;
+        return repaired;
     }
 
     private static SnapshotDiagnostic CreatePreservedDiagnostic(
