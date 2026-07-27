@@ -4,7 +4,7 @@
     <AssemblyName>Snapshot.Protocol</AssemblyName>
     <RootNamespace>Snapshot.Protocol</RootNamespace>
     <PackageId>Snapshot.Protocol</PackageId>
-    <PackageVersion>$(SnapshotPackageVersion)</PackageVersion>
+    <PackageVersion>$(SnapshotProtocolPackageVersion)</PackageVersion>
     <Description>Core Snapshot Protocol engine for route discovery, ZIP artifacts, validation, aliases, manifests, and streaming.</Description>
     <PackageTags>snapshot;spa;wasm;seo;prerender;zip;static-site</PackageTags>
     <IsPackable>true</IsPackable>
