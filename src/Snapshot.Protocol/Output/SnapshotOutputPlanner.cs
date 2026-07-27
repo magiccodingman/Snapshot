@@ -144,7 +144,7 @@ public sealed class SnapshotOutputPlanner
 
     public static IEnumerable<string> GenerateCaseVariants(
         string route,
-        SnapshotCaseAliasStrategy strategy = SnapshotCaseAliasStrategy.SingleSegment)
+        SnapshotCaseAliasStrategy strategy = SnapshotCaseAliasStrategy.CanonicalParent)
     {
         if (route == "/")
         {
@@ -156,6 +156,7 @@ public sealed class SnapshotOutputPlanner
 
         foreach (var candidate in strategy switch
                  {
+                     SnapshotCaseAliasStrategy.CanonicalParent => GenerateCanonicalParentVariants(segments),
                      SnapshotCaseAliasStrategy.SingleSegment => GenerateSingleSegmentVariants(segments),
                      SnapshotCaseAliasStrategy.Exhaustive => GenerateExhaustiveVariants(segments),
                      _ => throw new ArgumentOutOfRangeException(nameof(strategy), strategy, "Unsupported case alias strategy.")
@@ -165,6 +166,24 @@ public sealed class SnapshotOutputPlanner
             {
                 yield return candidate;
             }
+        }
+    }
+
+    private static IEnumerable<string> GenerateCanonicalParentVariants(IReadOnlyList<string> segments)
+    {
+        yield return '/' + string.Join('/', segments);
+
+        var finalIndex = segments.Count - 1;
+        foreach (var variant in GetSegmentVariants(segments[finalIndex]))
+        {
+            if (variant.Equals(segments[finalIndex], StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var candidate = segments.ToArray();
+            candidate[finalIndex] = variant;
+            yield return '/' + string.Join('/', candidate);
         }
     }
 

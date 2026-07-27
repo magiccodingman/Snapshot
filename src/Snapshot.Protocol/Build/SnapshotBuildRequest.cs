@@ -11,6 +11,7 @@ public enum SnapshotTargetFilesystem
 
 public enum SnapshotCaseAliasStrategy
 {
+    CanonicalParent,
     SingleSegment,
     Exhaustive
 }
@@ -49,7 +50,7 @@ public sealed class SnapshotCaseAliasOptions
 {
     public bool Enabled { get; init; } = true;
 
-    public SnapshotCaseAliasStrategy Strategy { get; init; } = SnapshotCaseAliasStrategy.SingleSegment;
+    public SnapshotCaseAliasStrategy Strategy { get; init; } = SnapshotCaseAliasStrategy.CanonicalParent;
 
     public bool GenerateMissingPrefixGateways { get; init; } = true;
 
