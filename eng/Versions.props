@@ -1,5 +1,8 @@
 <Project>
   <PropertyGroup>
-    <SnapshotPackageVersion>0.1.0</SnapshotPackageVersion>
+    <SnapshotProtocolPackageVersion>0.1.0</SnapshotProtocolPackageVersion>
+    <SnapshotProcessingPackageVersion>0.1.0</SnapshotProcessingPackageVersion>
+    <SnapshotPlaywrightPackageVersion>0.1.0</SnapshotPlaywrightPackageVersion>
+    <SnapshotCliPackageVersion>0.1.0</SnapshotCliPackageVersion>
   </PropertyGroup>
 </Project>

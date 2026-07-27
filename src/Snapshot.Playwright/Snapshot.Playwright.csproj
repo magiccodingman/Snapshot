@@ -4,7 +4,7 @@
     <AssemblyName>Snapshot.Playwright</AssemblyName>
     <RootNamespace>Snapshot.Playwright</RootNamespace>
     <PackageId>Snapshot.Playwright</PackageId>
-    <PackageVersion>$(SnapshotPackageVersion)</PackageVersion>
+    <PackageVersion>$(SnapshotPlaywrightPackageVersion)</PackageVersion>
     <Description>Playwright executor for Snapshot Protocol with local hosting, browser provisioning, retries, and worker pooling.</Description>
     <PackageTags>snapshot;playwright;chromium;spa;wasm;seo;prerender</PackageTags>
     <IsPackable>true</IsPackable>

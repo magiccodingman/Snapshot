@@ -4,7 +4,7 @@
     <AssemblyName>Snapshot.Processing</AssemblyName>
     <RootNamespace>Snapshot.Processing</RootNamespace>
     <PackageId>Snapshot.Processing</PackageId>
-    <PackageVersion>$(SnapshotPackageVersion)</PackageVersion>
+    <PackageVersion>$(SnapshotProcessingPackageVersion)</PackageVersion>
     <Description>Safe validation and conservative minification for Snapshot Protocol HTML artifacts.</Description>
     <PackageTags>snapshot;html;seo;canonical;minify;json;css;static-site</PackageTags>
     <IsPackable>true</IsPackable>

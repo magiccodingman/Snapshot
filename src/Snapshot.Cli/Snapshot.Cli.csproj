@@ -5,7 +5,7 @@
     <AssemblyName>Snapshot.Cli</AssemblyName>
     <RootNamespace>Snapshot.Cli</RootNamespace>
     <PackageId>Snapshot.Cli</PackageId>
-    <PackageVersion>$(SnapshotPackageVersion)</PackageVersion>
+    <PackageVersion>$(SnapshotCliPackageVersion)</PackageVersion>
     <Description>Cross-platform command-line tool for building, inspecting, extracting, validating, and safely processing Snapshot Protocol ZIP artifacts.</Description>
     <PackageTags>snapshot;cli;playwright;spa;wasm;seo;zip;minify</PackageTags>
     <IsPackable>true</IsPackable>

@@ -1,10 +1,15 @@
 # CLI reference
 
-Install:
+## .NET prerequisite
+
+Snapshot currently targets .NET 10. Install the matching .NET SDK or runtime before installing and running the global tool:
 
 ```bash
+dotnet --version
 dotnet tool install --global Snapshot.Cli
 ```
+
+The repository's authoritative shared target framework is defined in [`Directory.Build.props`](../Directory.Build.props). Project-specific requirements are defined in the corresponding `.csproj` files, and [`global.json`](../global.json) selects the SDK used to build the repository. Check those files if this documentation has not yet been updated for a newer target.
 
 Main commands:
 
