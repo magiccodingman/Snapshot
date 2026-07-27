@@ -65,16 +65,55 @@ snapshot build ./publish/wwwroot --output ./site.snapshot.zip
 
 The CLI package intentionally does not embed enormous platform-specific Playwright drivers or Chromium builds. Before the first browser operation it locates the exact Microsoft.Playwright driver in the NuGet cache, or downloads that matching package from NuGet's stable package endpoint into Snapshot's per-user cache. Chromium is provisioned separately, then a real browser launch is validated before rendering. Interrupted or incomplete driver and browser installations are detected and repaired.
 
+## Safe processing
+
+The CLI validates and safely compacts generated snapshot pages by default. Processing applies only to manifest entries marked as real snapshots. It never modifies the developer's source `/index.html`, case aliases, prefix gateways, assets, or hosting artifacts.
+
+Default processing:
+
+- Requires exactly one absolute HTTP or HTTPS canonical URL.
+- Requires the canonical path to match the captured route. The supplied domain is trusted.
+- Validates and compacts inline JSON and JSON-LD.
+- Conservatively compacts inline `<style>` blocks and validates the output again.
+- Conservatively collapses HTML whitespace and removes ordinary HTML comments.
+- Preserves conditional, crawler-control, and Snapshot Protocol comments.
+- Re-parses transformed HTML and compares structural, executable-content, sensitive-text, and visible-text invariants.
+- Falls back to the unminified snapshot whenever the transformed result cannot be proven equivalent.
+
+Snapshot processing does **not** minify JavaScript, rename identifiers or selectors, rewrite filenames, combine files, tree-shake code, optimize SVGs, or compress images. Those application-build responsibilities remain outside Snapshot.
+
+Disable only minification while retaining validation:
+
+```bash
+snapshot build ./wwwroot --no-minify
+```
+
+Relax canonical enforcement deliberately:
+
+```bash
+snapshot build ./wwwroot --canonical-policy warning
+```
+
+Existing Snapshot archives can use the same processor:
+
+```bash
+snapshot process ./site.snapshot.zip ./site.processed.snapshot.zip
+```
+
+See [Safe processing](docs/processing.md) for the complete policy and configuration.
+
 ## .NET API
 
-Install the Playwright package. `Snapshot.Protocol` is included transitively:
+Install the executor and standard processing packages. `Snapshot.Protocol` is included transitively:
 
 ```bash
 dotnet add package Snapshot.Playwright
+dotnet add package Snapshot.Processing
 ```
 
 ```csharp
 using Snapshot.Playwright;
+using Snapshot.Processing;
 using Snapshot.Protocol.Build;
 
 var engine = SnapshotEngine.CreateBuilder()
@@ -82,6 +121,7 @@ var engine = SnapshotEngine.CreateBuilder()
     {
         options.Headless = true;
     })
+    .UseStandardProcessing()
     .Build();
 
 var result = await engine.BuildAsync(new SnapshotBuildRequest
@@ -92,7 +132,7 @@ var result = await engine.BuildAsync(new SnapshotBuildRequest
 });
 ```
 
-The core package owns route discovery, casing rules, output planning, ZIP creation, manifests, archive helpers, diagnostics, and validation. `Snapshot.Playwright` supplies the real browser executor.
+`Snapshot.Protocol` owns route discovery, casing rules, output planning, streaming ZIP creation, manifests, archive helpers, diagnostics, validation, and the processor contract. `Snapshot.Playwright` supplies the real browser executor. `Snapshot.Processing` supplies reusable validation and conservative transformation implementations.
 
 ## Archive helpers
 
@@ -186,6 +226,7 @@ IPFS subdomain gateways and DNSLink provide a proper application origin. Legacy 
 - [Protocol and message contract](docs/protocol.md)
 - [Root gateway](docs/root-gateway.md)
 - [Browser client](docs/client-script.md)
+- [Safe processing](docs/processing.md)
 - [.NET API](docs/dotnet-api.md)
 - [Playwright executor](docs/playwright.md)
 - [CLI reference](docs/cli.md)

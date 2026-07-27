@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Snapshot.Protocol.Abstractions;
 using Snapshot.Protocol.Diagnostics;
 using Snapshot.Protocol.Output;
+using Snapshot.Protocol.Processing;
 using Snapshot.Protocol.Protocol;
 using Snapshot.Protocol.Routes;
 using Snapshot.Protocol.Validation;
@@ -13,11 +14,13 @@ namespace Snapshot.Protocol.Build;
 public sealed partial class SnapshotEngine
 {
     private readonly ISnapshotRenderer _renderer;
+    private readonly ISnapshotProcessor _processor;
     private readonly ISnapshotLogger _logger;
 
-    internal SnapshotEngine(ISnapshotRenderer renderer, ISnapshotLogger logger)
+    internal SnapshotEngine(ISnapshotRenderer renderer, ISnapshotProcessor processor, ISnapshotLogger logger)
     {
         _renderer = renderer;
+        _processor = processor;
         _logger = logger;
     }
 
@@ -110,7 +113,7 @@ public sealed partial class SnapshotEngine
                     cancellationToken);
 
             progress?.Report(new SnapshotProgress(SnapshotProgressStage.WritingArchive, "Streaming source and rendered entries into the ZIP artifact."));
-            var writer = new SnapshotZipWriter(_logger);
+            var writer = new SnapshotZipWriter(_logger, _processor);
             temporaryPath = outputPath + ".partial";
             var written = await writer.WriteAsync(
                 request,
@@ -120,6 +123,8 @@ public sealed partial class SnapshotEngine
                 siteVersion,
                 progress,
                 cancellationToken).ConfigureAwait(false);
+
+            diagnostics.AddRange(written.Diagnostics);
 
             foreach (var rendered in written.RenderResults)
             {
@@ -134,13 +139,18 @@ public sealed partial class SnapshotEngine
 
                 if (!rendered.Succeeded)
                 {
-                    diagnostics.Add(new SnapshotDiagnostic(
-                        rendered.ErrorCode ?? SnapshotDiagnosticCodes.BrowserFailure,
-                        SnapshotDiagnosticSeverity.Error,
-                        rendered.ErrorMessage ?? "The browser renderer did not return a snapshot.",
-                        rendered.Route.Path,
-                        rendered.Route.Source,
-                        rendered.Route.OutputPath.Value));
+                    var code = rendered.ErrorCode ?? SnapshotDiagnosticCodes.BrowserFailure;
+                    var message = rendered.ErrorMessage ?? "The browser renderer did not return a snapshot.";
+                    if (!ContainsDiagnostic(diagnostics, code, rendered.Route.Path, message))
+                    {
+                        diagnostics.Add(new SnapshotDiagnostic(
+                            code,
+                            SnapshotDiagnosticSeverity.Error,
+                            message,
+                            rendered.Route.Path,
+                            rendered.Route.Source,
+                            rendered.Route.OutputPath.Value));
+                    }
                 }
             }
 
@@ -293,6 +303,17 @@ public sealed partial class SnapshotEngine
         var version = SiteVersionRegex().Match(script.Value);
         return version.Success ? version.Groups[2].Value.Trim() : null;
     }
+
+    private static bool ContainsDiagnostic(
+        IEnumerable<SnapshotDiagnostic> diagnostics,
+        string code,
+        string route,
+        string message) =>
+        diagnostics.Any(diagnostic =>
+            diagnostic.Severity == SnapshotDiagnosticSeverity.Error &&
+            diagnostic.Code.Equals(code, StringComparison.Ordinal) &&
+            string.Equals(diagnostic.Route, route, StringComparison.Ordinal) &&
+            diagnostic.Message.Equals(message, StringComparison.Ordinal));
 
     private static bool HasErrors(IEnumerable<SnapshotDiagnostic> diagnostics) =>
         diagnostics.Any(static diagnostic => diagnostic.Severity == SnapshotDiagnosticSeverity.Error);

@@ -4,6 +4,7 @@ using Snapshot.Cli.ConsoleOutput;
 using Snapshot.Playwright;
 using Snapshot.Playwright.Browser;
 using Snapshot.Playwright.Setup;
+using Snapshot.Processing;
 using Snapshot.Protocol.Archive;
 using Snapshot.Protocol.Build;
 using Snapshot.Protocol.Diagnostics;
@@ -34,6 +35,7 @@ internal static class SnapshotCli
             return command switch
             {
                 "build" => await BuildAsync(input, logger).ConfigureAwait(false),
+                "process" => await ProcessAsync(input).ConfigureAwait(false),
                 "validate" => await ValidateAsync(input).ConfigureAwait(false),
                 "validate-host" => await ValidateHostAsync(input).ConfigureAwait(false),
                 "inspect" => await InspectAsync(input).ConfigureAwait(false),
@@ -69,6 +71,7 @@ internal static class SnapshotCli
         var startupTimeout = TimeSpan.FromSeconds(input.GetDouble("startup-timeout") ?? 60);
         var watchdogTimeout = TimeSpan.FromSeconds(input.GetDouble("watchdog-timeout") ?? Math.Max(40, routeTimeout.TotalSeconds + 10));
         var browserMode = ParseBrowserMode(input.Get("browser-install-mode"), input.Get("browser-executable"));
+        var processing = CreateProcessingOptions(input);
 
         var engine = SnapshotEngine.CreateBuilder()
             .UsePlaywright(options =>
@@ -79,6 +82,7 @@ internal static class SnapshotCli
                 options.Concurrency = input.GetInt("concurrency");
                 options.InstallLinuxDependencies = input.Has("with-deps");
             }, logger)
+            .UseStandardProcessing(processing)
             .Build();
 
         var request = new SnapshotBuildRequest
@@ -122,6 +126,25 @@ internal static class SnapshotCli
         }
 
         return result.Succeeded ? 0 : 1;
+    }
+
+    private static async Task<int> ProcessAsync(CommandLine input)
+    {
+        var source = RequiredPositional(input, 0, "process requires a source snapshot ZIP path.");
+        var output = RequiredPositional(input, 1, "process requires a destination snapshot ZIP path.");
+        var processor = new SnapshotArchiveProcessor(CreateProcessingOptions(input));
+        var result = await processor.ProcessAsync(source, output).ConfigureAwait(false);
+        PrintDiagnostics(result.Diagnostics);
+
+        if (!result.Succeeded)
+        {
+            Console.Error.WriteLine("Snapshot archive processing failed.");
+            return 1;
+        }
+
+        Console.WriteLine($"Processed {result.ProcessedSnapshots:N0} snapshots into {result.OutputPath}.");
+        Console.WriteLine($"Snapshot HTML: {result.OriginalSnapshotBytes:N0} -> {result.ProcessedSnapshotBytes:N0} bytes ({result.SavedBytes:N0} bytes saved).");
+        return 0;
     }
 
     private static async Task<int> ValidateAsync(CommandLine input)
@@ -216,6 +239,30 @@ internal static class SnapshotCli
         throw new ArgumentException("browser action must be 'install' or 'status'.");
     }
 
+    private static SnapshotProcessingOptions CreateProcessingOptions(CommandLine input)
+    {
+        var disabled = input.Has("no-processing");
+        var noMinify = input.Has("no-minify");
+        return new SnapshotProcessingOptions
+        {
+            Enabled = !disabled,
+            MinifyHtml = !noMinify && !input.Has("no-minify-html"),
+            RemoveHtmlComments = !noMinify && !input.Has("keep-html-comments"),
+            MinifyInlineJson = !noMinify && !input.Has("no-minify-inline-json"),
+            ValidateInlineJson = true,
+            MinifyInlineCss = !noMinify && !input.Has("no-minify-inline-css"),
+            CanonicalPolicy = ParseCanonicalPolicy(input.Get("canonical-policy"))
+        };
+    }
+
+    private static SnapshotCanonicalPolicy ParseCanonicalPolicy(string? value) => value?.ToLowerInvariant() switch
+    {
+        null or "error" => SnapshotCanonicalPolicy.Error,
+        "warning" or "warn" => SnapshotCanonicalPolicy.Warning,
+        "disabled" or "off" => SnapshotCanonicalPolicy.Disabled,
+        _ => throw new ArgumentException("--canonical-policy must be error, warning, or off.")
+    };
+
     private static SnapshotTargetFilesystem ParseTarget(string? value) => value?.ToLowerInvariant() switch
     {
         null or "case-sensitive" => SnapshotTargetFilesystem.CaseSensitive,
@@ -276,6 +323,7 @@ Snapshot Protocol CLI
 
 Commands:
   snapshot build <source> [options]
+  snapshot process <source.zip> <output.zip> [processing options]
   snapshot validate <artifact.zip>
   snapshot validate-host <artifact.zip> <base-url>
   snapshot inspect <artifact.zip> [--tree|--manifest|--file <path>]
@@ -288,7 +336,7 @@ Build options:
   --target-filesystem <mode>           case-sensitive (default) or windows
   --route <path>                       Repeat for explicit routes
   --route-discovery <mode>             sitemaps-and-explicit, sitemaps-only, explicit-only
-  --no-root-gateway                   Do not generate /index/index.html for route /
+  --no-root-gateway                    Do not generate /index/index.html for route /
   --no-case-aliases
   --no-missing-prefix-gateways
   --maximum-aliases-per-route <count>  No limit by default
@@ -305,6 +353,18 @@ Build options:
   --report <json-path>
   --preserve-partial
   --verbose
+
+Processing options (default on for build and process):
+  --no-processing                      Disable validation and minification
+  --no-minify                          Keep validation; disable all minification
+  --no-minify-html                     Disable HTML whitespace minification
+  --keep-html-comments                 Preserve ordinary HTML comments
+  --no-minify-inline-json              Preserve inline JSON/JSON-LD formatting
+  --no-minify-inline-css               Preserve inline <style> formatting
+  --canonical-policy <mode>            error (default), warning, or off
+
+Snapshot processing never minifies JavaScript, renames identifiers, rewrites filenames,
+bundles assets, performs tree shaking, or modifies the original source index.html loader.
 """);
     }
 }

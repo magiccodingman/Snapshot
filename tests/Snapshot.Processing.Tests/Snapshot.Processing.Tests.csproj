@@ -6,9 +6,8 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Snapshot.Protocol/Snapshot.Protocol.csproj" />
     <ProjectReference Include="../../src/Snapshot.Processing/Snapshot.Processing.csproj" />
-    <ProjectReference Include="../../src/Snapshot.Playwright/Snapshot.Playwright.csproj" />
-    <ProjectReference Include="../Snapshot.TestHost/Snapshot.TestHost.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit.v3" />
+    <PackageReference Include="coverlet.collector" PrivateAssets="all" />
   </ItemGroup>
 </Project>

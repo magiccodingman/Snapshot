@@ -35,6 +35,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force artifacts/packages | Out-Null
           dotnet pack src/Snapshot.Protocol/Snapshot.Protocol.csproj -c Release --no-restore -o artifacts/packages
+          dotnet pack src/Snapshot.Processing/Snapshot.Processing.csproj -c Release --no-restore -o artifacts/packages
           dotnet pack src/Snapshot.Playwright/Snapshot.Playwright.csproj -c Release --no-restore -o artifacts/packages
           dotnet clean src/Snapshot.Cli/Snapshot.Cli.csproj -c Release -p:PlaywrightPlatform=none
           dotnet clean src/Snapshot.Playwright/Snapshot.Playwright.csproj -c Release -p:PlaywrightPlatform=none -p:SnapshotExcludePlaywrightLauncher=true
@@ -84,6 +85,11 @@ jobs:
           version="$(sed -n 's:.*<SnapshotPackageVersion>\(.*\)</SnapshotPackageVersion>.*:\1:p' eng/Versions.props)"
 
           dotnet nuget push "artifacts/packages/Snapshot.Protocol.${version}.nupkg" \
+            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+          dotnet nuget push "artifacts/packages/Snapshot.Processing.${version}.nupkg" \
             --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate

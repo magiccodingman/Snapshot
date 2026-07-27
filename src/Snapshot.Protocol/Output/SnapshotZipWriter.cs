@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
@@ -8,6 +9,7 @@ using Snapshot.Protocol.Diagnostics;
 using Snapshot.Protocol.Hosting;
 using Snapshot.Protocol.Hosting.Netlify;
 using Snapshot.Protocol.Manifest;
+using Snapshot.Protocol.Processing;
 using Snapshot.Protocol.Protocol;
 
 namespace Snapshot.Protocol.Output;
@@ -15,15 +17,20 @@ namespace Snapshot.Protocol.Output;
 public sealed record SnapshotZipWriteResult(
     SnapshotManifest? Manifest,
     string TemporaryPath,
-    IReadOnlyList<SnapshotRenderResult> RenderResults);
+    IReadOnlyList<SnapshotRenderResult> RenderResults,
+    IReadOnlyList<SnapshotDiagnostic> Diagnostics);
 
 public sealed class SnapshotZipWriter
 {
-    private readonly ISnapshotLogger _logger;
+    private const int StreamBufferSize = 1024 * 128;
 
-    public SnapshotZipWriter(ISnapshotLogger logger)
+    private readonly ISnapshotLogger _logger;
+    private readonly ISnapshotProcessor _processor;
+
+    public SnapshotZipWriter(ISnapshotLogger logger, ISnapshotProcessor processor)
     {
         _logger = logger;
+        _processor = processor;
     }
 
     public async Task<SnapshotZipWriteResult> WriteAsync(
@@ -44,6 +51,7 @@ public sealed class SnapshotZipWriter
 
         var manifestEntries = new List<SnapshotManifestEntry>();
         var renderSummaries = new List<SnapshotRenderResult>();
+        var processingDiagnostics = new List<SnapshotDiagnostic>();
         var written = new HashSet<string>(StringComparer.Ordinal);
         var canonicalByOutputPath = plan.CanonicalRoutes.ToDictionary(static route => route.OutputPath.Value, StringComparer.Ordinal);
         var snapshotsByRoute = plan.GeneratedEntries
@@ -55,23 +63,19 @@ public sealed class SnapshotZipWriter
             FileMode.CreateNew,
             FileAccess.ReadWrite,
             FileShare.None,
-            bufferSize: 1024 * 128,
+            bufferSize: StreamBufferSize,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
 
         using var archive = new ZipArchive(file, ZipArchiveMode.Create, leaveOpen: true);
-
-        var sourceFiles = Directory.EnumerateFiles(plan.SourceDirectory, "*", SearchOption.AllDirectories)
-            .OrderBy(static path => path, StringComparer.Ordinal)
-            .ToArray();
 
         var outputFullPath = Path.GetFullPath(outputPath);
         var temporaryFullPath = Path.GetFullPath(temporaryPath);
         var netlify = request.Hosting.Provider == SnapshotHostingProvider.Netlify;
 
         var completed = 0;
-        var total = sourceFiles.Length + plan.GeneratedEntries.Count + (netlify ? 2 : 0) + 1;
+        var total = plan.SourceEntries.Count + plan.GeneratedEntries.Count + (netlify ? 2 : 0) + 1;
 
-        foreach (var sourceFile in sourceFiles)
+        foreach (var sourceFile in Directory.EnumerateFiles(plan.SourceDirectory, "*", SearchOption.AllDirectories))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var sourceFullPath = Path.GetFullPath(sourceFile);
@@ -92,7 +96,7 @@ public sealed class SnapshotZipWriter
                 continue;
             }
 
-            await using var input = new FileStream(sourceFile, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 128, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            await using var input = new FileStream(sourceFile, FileMode.Open, FileAccess.Read, FileShare.Read, StreamBufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
             var (length, hash) = await WriteStreamEntryAsync(archive, archivePath, input, cancellationToken).ConfigureAwait(false);
             var canonicalRoute = canonicalByOutputPath.TryGetValue(archivePath, out var manualRoute)
                 ? manualRoute.Path
@@ -114,9 +118,9 @@ public sealed class SnapshotZipWriter
                 throw new InvalidOperationException($"The renderer returned route {rendered.Route.Path} more than once.");
             }
 
-            renderSummaries.Add(rendered with { Html = null });
             if (!rendered.Succeeded)
             {
+                renderSummaries.Add(rendered with { Html = null });
                 continue;
             }
 
@@ -135,8 +139,27 @@ public sealed class SnapshotZipWriter
                 throw new InvalidOperationException($"Duplicate generated snapshot output: {planned.ArchivePath}.");
             }
 
-            var bytes = Encoding.UTF8.GetBytes(rendered.Html);
-            var (length, hash) = await WriteBytesEntryAsync(archive, planned.ArchivePath, bytes, cancellationToken).ConfigureAwait(false);
+            var processed = await _processor.ProcessAsync(
+                new SnapshotProcessingContext(rendered.Route, rendered.Html),
+                cancellationToken).ConfigureAwait(false);
+            processingDiagnostics.AddRange(processed.Diagnostics);
+
+            var processingError = processed.Diagnostics.FirstOrDefault(static diagnostic =>
+                diagnostic.Severity == SnapshotDiagnosticSeverity.Error);
+            if (processingError is not null)
+            {
+                renderSummaries.Add(rendered with
+                {
+                    Succeeded = false,
+                    Html = null,
+                    ErrorCode = processingError.Code,
+                    ErrorMessage = processingError.Message
+                });
+                continue;
+            }
+
+            renderSummaries.Add(rendered with { Html = null });
+            var (length, hash) = await WriteTextEntryAsync(archive, planned.ArchivePath, processed.Html, cancellationToken).ConfigureAwait(false);
             manifestEntries.Add(new SnapshotManifestEntry(
                 planned.ArchivePath,
                 SnapshotManifestEntryKind.Snapshot,
@@ -162,7 +185,7 @@ public sealed class SnapshotZipWriter
         {
             archive.Dispose();
             await file.FlushAsync(cancellationToken).ConfigureAwait(false);
-            return new SnapshotZipWriteResult(null, temporaryPath, renderSummaries);
+            return new SnapshotZipWriteResult(null, temporaryPath, renderSummaries, processingDiagnostics);
         }
 
         foreach (var planned in plan.GeneratedEntries.Where(static entry => entry.Kind != SnapshotGeneratedEntryKind.Snapshot))
@@ -174,8 +197,7 @@ public sealed class SnapshotZipWriter
             }
 
             var content = planned.Content ?? throw new InvalidOperationException($"Generated entry {planned.ArchivePath} had no content.");
-            var bytes = Encoding.UTF8.GetBytes(content);
-            var (length, hash) = await WriteBytesEntryAsync(archive, planned.ArchivePath, bytes, cancellationToken).ConfigureAwait(false);
+            var (length, hash) = await WriteTextEntryAsync(archive, planned.ArchivePath, content, cancellationToken).ConfigureAwait(false);
             manifestEntries.Add(new SnapshotManifestEntry(
                 planned.ArchivePath,
                 MapKind(planned.Kind),
@@ -196,8 +218,7 @@ public sealed class SnapshotZipWriter
                     throw new InvalidOperationException($"Duplicate provider artifact: {artifact.Path}");
                 }
 
-                var bytes = Encoding.UTF8.GetBytes(artifact.Content);
-                var (length, hash) = await WriteBytesEntryAsync(archive, artifact.Path, bytes, cancellationToken).ConfigureAwait(false);
+                var (length, hash) = await WriteTextEntryAsync(archive, artifact.Path, artifact.Content, cancellationToken).ConfigureAwait(false);
                 manifestEntries.Add(new SnapshotManifestEntry(artifact.Path, SnapshotManifestEntryKind.HostingArtifact, length, hash));
                 progress?.Report(new SnapshotProgress(SnapshotProgressStage.WritingArchive, $"Generated {artifact.Path}", ++completed, total));
             }
@@ -214,14 +235,13 @@ public sealed class SnapshotZipWriter
             Entries = manifestEntries.OrderBy(static entry => entry.Path, StringComparer.Ordinal).ToArray()
         };
 
-        var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, SnapshotManifestJson.Options);
-        await WriteBytesEntryAsync(archive, SnapshotProtocolConstants.ManifestFileName, manifestBytes, cancellationToken).ConfigureAwait(false);
+        await WriteManifestEntryAsync(archive, manifest, cancellationToken).ConfigureAwait(false);
         progress?.Report(new SnapshotProgress(SnapshotProgressStage.WritingArchive, $"Wrote {SnapshotProtocolConstants.ManifestFileName}", ++completed, total));
 
         archive.Dispose();
         await file.FlushAsync(cancellationToken).ConfigureAwait(false);
         _logger.Log(new SnapshotLogEntry(SnapshotLogLevel.Information, $"Created temporary artifact {temporaryPath}."));
-        return new SnapshotZipWriteResult(manifest, temporaryPath, renderSummaries);
+        return new SnapshotZipWriteResult(manifest, temporaryPath, renderSummaries, processingDiagnostics);
     }
 
     private static SnapshotManifestEntryKind MapKind(SnapshotGeneratedEntryKind kind) => kind switch
@@ -233,16 +253,46 @@ public sealed class SnapshotZipWriter
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null)
     };
 
-    private static async Task<(long Length, string Hash)> WriteBytesEntryAsync(
+    private static async Task<(long Length, string Hash)> WriteTextEntryAsync(
         ZipArchive archive,
         string path,
-        ReadOnlyMemory<byte> bytes,
+        string text,
         CancellationToken cancellationToken)
     {
         var entry = archive.CreateEntry(path, CompressionLevel.SmallestSize);
         await using var output = entry.Open();
-        await output.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
-        return (bytes.Length, Convert.ToHexString(SHA256.HashData(bytes.Span)).ToLowerInvariant());
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = ArrayPool<byte>.Shared.Rent(StreamBufferSize);
+        long length = 0;
+
+        try
+        {
+            var offset = 0;
+            var maximumChars = Math.Max(2, buffer.Length / 4);
+            while (offset < text.Length)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var charCount = Math.Min(maximumChars, text.Length - offset);
+                if (offset + charCount < text.Length &&
+                    char.IsHighSurrogate(text[offset + charCount - 1]) &&
+                    char.IsLowSurrogate(text[offset + charCount]))
+                {
+                    charCount = charCount == 1 ? 2 : charCount - 1;
+                }
+
+                var bytesWritten = Encoding.UTF8.GetBytes(text.AsSpan(offset, charCount), buffer.AsSpan());
+                hash.AppendData(buffer, 0, bytesWritten);
+                await output.WriteAsync(buffer.AsMemory(0, bytesWritten), cancellationToken).ConfigureAwait(false);
+                offset += charCount;
+                length += bytesWritten;
+            }
+
+            return (length, Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant());
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     private static async Task<(long Length, string Hash)> WriteStreamEntryAsync(
@@ -254,22 +304,43 @@ public sealed class SnapshotZipWriter
         var entry = archive.CreateEntry(path, CompressionLevel.SmallestSize);
         await using var output = entry.Open();
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        var buffer = new byte[1024 * 128];
+        var buffer = ArrayPool<byte>.Shared.Rent(StreamBufferSize);
         long length = 0;
 
-        while (true)
+        try
         {
-            var read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-            if (read == 0)
+            while (true)
             {
-                break;
+                var read = await input.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                hash.AppendData(buffer, 0, read);
+                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                length += read;
             }
 
-            hash.AppendData(buffer, 0, read);
-            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-            length += read;
+            return (length, Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant());
         }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
 
-        return (length, Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant());
+    private static async Task WriteManifestEntryAsync(
+        ZipArchive archive,
+        SnapshotManifest manifest,
+        CancellationToken cancellationToken)
+    {
+        var entry = archive.CreateEntry(SnapshotProtocolConstants.ManifestFileName, CompressionLevel.SmallestSize);
+        await using var output = entry.Open();
+        await JsonSerializer.SerializeAsync(
+            output,
+            manifest,
+            SnapshotManifestJson.Options,
+            cancellationToken).ConfigureAwait(false);
     }
 }

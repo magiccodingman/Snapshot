@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Snapshot.Playwright;
+using Snapshot.Processing;
 using Snapshot.Protocol.Archive;
 using Snapshot.Protocol.Build;
 using Snapshot.Protocol.Hosting;
@@ -36,7 +37,7 @@ public sealed class SnapshotEndToEndTests
 
             var webRoot = Path.Combine(publishDirectory, "wwwroot");
             var sourceLoader = await File.ReadAllTextAsync(Path.Combine(webRoot, "index.html"));
-            var engine = SnapshotEngine.CreateBuilder().UsePlaywright().Build();
+            var engine = SnapshotEngine.CreateBuilder().UsePlaywright().UseStandardProcessing().Build();
             var result = await engine.BuildAsync(new SnapshotBuildRequest
             {
                 SourceDirectory = webRoot,
@@ -183,7 +184,7 @@ public sealed class SnapshotEndToEndTests
                 </html>
                 """);
 
-            var engine = SnapshotEngine.CreateBuilder().UsePlaywright().Build();
+            var engine = SnapshotEngine.CreateBuilder().UsePlaywright().UseStandardProcessing().Build();
             var result = await engine.BuildAsync(new SnapshotBuildRequest
             {
                 SourceDirectory = sourceDirectory,
