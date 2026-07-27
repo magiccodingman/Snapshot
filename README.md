@@ -229,7 +229,7 @@ IPFS subdomain gateways and DNSLink provide a proper application origin. Legacy 
 
 - `main` is active upstream development.
 - `release` is the protected stable source.
-- npm publishing runs only for `client/**` changes and uses npm Trusted Publishing through GitHub OIDC. The client version in `client/package.json` determines whether a new package is published.
+- npm publishing runs only for publishable browser-client inputs (`client/src/**`, package metadata, and the build script) and uses npm Trusted Publishing through GitHub OIDC. The client version in `client/package.json` determines whether a new package is published.
 - `Snapshot.Protocol`, `Snapshot.Processing`, `Snapshot.Playwright`, and `Snapshot.Cli` have independent versions in `eng/Versions.props`. A release publishes only package versions that do not already exist on NuGet.org.
 - README, license, and logo edits do not automatically create package releases. They are included the next time an intentionally versioned package is published; manual workflow runs are available for rerunning that release automation when needed.
 - GitHub releases and immutable tags remain manually authored archival milestones.
