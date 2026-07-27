@@ -8,9 +8,6 @@ on:
       - 'eng/Versions.props'
       - 'Directory.Build.props'
       - 'Directory.Packages.props'
-      - 'README.md'
-      - 'LICENSE'
-      - '128x128_compressed.png'
   workflow_dispatch:
 
 permissions:
@@ -70,7 +67,7 @@ jobs:
       - name: Validate packed CLI installation
         shell: pwsh
         run: |
-          $version = (Select-String -Path eng/Versions.props -Pattern '<SnapshotPackageVersion>(.*?)</SnapshotPackageVersion>').Matches.Groups[1].Value
+          $version = (Select-String -Path eng/Versions.props -Pattern '<SnapshotCliPackageVersion>(.*?)</SnapshotCliPackageVersion>').Matches.Groups[1].Value
           dotnet tool install Snapshot.Cli --version $version --tool-path artifacts/tool-test --add-source artifacts/packages --ignore-failed-sources
           ./artifacts/tool-test/snapshot help
       - name: NuGet login using trusted publishing
@@ -78,28 +75,43 @@ jobs:
         id: login
         with:
           user: ${{ secrets.NUGET_USER }}
-      - name: Publish packages
+      - name: Publish only new package versions
         shell: bash
         run: |
           set -euo pipefail
-          version="$(sed -n 's:.*<SnapshotPackageVersion>\(.*\)</SnapshotPackageVersion>.*:\1:p' eng/Versions.props)"
 
-          dotnet nuget push "artifacts/packages/Snapshot.Protocol.${version}.nupkg" \
-            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
-            --source https://api.nuget.org/v3/index.json \
-            --skip-duplicate
+          read_version() {
+            local property="$1"
+            sed -n "s:.*<${property}>\(.*\)</${property}>.*:\1:p" eng/Versions.props
+          }
 
-          dotnet nuget push "artifacts/packages/Snapshot.Processing.${version}.nupkg" \
-            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
-            --source https://api.nuget.org/v3/index.json \
-            --skip-duplicate
+          publish_if_new() {
+            local package_id="$1"
+            local version="$2"
+            local package_path="artifacts/packages/${package_id}.${version}.nupkg"
+            local lower_id="${package_id,,}"
+            local lower_version="${version,,}"
+            local versions_url="https://api.nuget.org/v3-flatcontainer/${lower_id}/index.json"
 
-          dotnet nuget push "artifacts/packages/Snapshot.Playwright.${version}.nupkg" \
-            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
-            --source https://api.nuget.org/v3/index.json \
-            --skip-duplicate
+            if [[ ! -f "$package_path" ]]; then
+              echo "Expected package was not produced: ${package_path}"
+              exit 1
+            fi
 
-          dotnet nuget push "artifacts/packages/Snapshot.Cli.${version}.nupkg" \
-            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
-            --source https://api.nuget.org/v3/index.json \
-            --skip-duplicate
+            if versions_json="$(curl -fsSL "$versions_url" 2>/dev/null)" && \
+               jq -e --arg version "$lower_version" '.versions | index($version) != null' <<<"$versions_json" >/dev/null; then
+              echo "${package_id}@${version} is already published; skipping."
+              return
+            fi
+
+            echo "Publishing ${package_id}@${version}."
+            dotnet nuget push "$package_path" \
+              --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          }
+
+          publish_if_new 'Snapshot.Protocol' "$(read_version SnapshotProtocolPackageVersion)"
+          publish_if_new 'Snapshot.Processing' "$(read_version SnapshotProcessingPackageVersion)"
+          publish_if_new 'Snapshot.Playwright' "$(read_version SnapshotPlaywrightPackageVersion)"
+          publish_if_new 'Snapshot.Cli' "$(read_version SnapshotCliPackageVersion)"
