@@ -1,3 +1,4 @@
+using AngleSharp.Html.Parser;
 using Snapshot.Protocol.Archive;
 using Snapshot.Protocol.Diagnostics;
 using Snapshot.Protocol.Manifest;
@@ -42,7 +43,7 @@ public sealed class SnapshotArchiveValidator
             }
 
             var html = await archive.ReadTextAsync(route.OutputPath.Value, cancellationToken: cancellationToken).ConfigureAwait(false);
-            if (html.Contains($"<{SnapshotProtocolConstants.ReadyElementName}", StringComparison.OrdinalIgnoreCase))
+            if (ContainsReadinessElement(html))
             {
                 diagnostics.Add(new SnapshotDiagnostic(
                     SnapshotDiagnosticCodes.SnapshotInvalid,
@@ -76,5 +77,12 @@ public sealed class SnapshotArchiveValidator
         }
 
         return diagnostics;
+    }
+
+    internal static bool ContainsReadinessElement(string html)
+    {
+        ArgumentNullException.ThrowIfNull(html);
+        var document = new HtmlParser().ParseDocument(html);
+        return document.QuerySelector(SnapshotProtocolConstants.ReadyElementName) is not null;
     }
 }
